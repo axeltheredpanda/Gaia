@@ -3,8 +3,9 @@ import { SYSTEM_PROMPT } from './systemPrompt'
 import { getCurrentDateTimeLine } from './datetime'
 import { routeModel } from './router'
 import { runToolLoop } from './toolLoop'
+import { extractMemoryFacts } from './memoryExtraction'
 import { appendMessage, loadRecentHistory, getConversationSummary, maybeSummarize } from '../supabase/history'
-import { getMemoryFactsBlock } from '../supabase/memory'
+import { getCoreFactsBlock, getPeripheralFactsBlock } from '../supabase/memory'
 
 export interface ChatReply {
   text: string
@@ -15,14 +16,21 @@ export interface ChatReply {
 export async function sendChat(userText: string): Promise<ChatReply> {
   const model = routeModel(userText)
   const history = await loadRecentHistory()
-  const [summary, memoryBlock] = await Promise.all([getConversationSummary(), getMemoryFactsBlock()])
+  const [summary, coreBlock, peripheralBlock] = await Promise.all([
+    getConversationSummary(),
+    getCoreFactsBlock(),
+    getPeripheralFactsBlock(userText)
+  ])
+
+  // persona + faits core : stables, regroupés dans le seul bloc mis en cache
+  const cachedText = coreBlock ? `${SYSTEM_PROMPT}\n\nFaits durables sur Axel :\n${coreBlock}` : SYSTEM_PROMPT
 
   const system: Anthropic.Beta.BetaTextBlockParam[] = [
-    { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: cachedText, cache_control: { type: 'ephemeral' } },
     // jamais cache_control ici : doit être fraîche à chaque requête
     { type: 'text', text: getCurrentDateTimeLine() }
   ]
-  if (memoryBlock) system.push({ type: 'text', text: `Faits durables sur Axel :\n${memoryBlock}` })
+  if (peripheralBlock) system.push({ type: 'text', text: `Faits potentiellement pertinents :\n${peripheralBlock}` })
   if (summary) system.push({ type: 'text', text: `Résumé de la conversation précédente :\n${summary}` })
 
   const userMessage: Anthropic.Beta.BetaMessageParam = { role: 'user', content: userText }
@@ -38,6 +46,9 @@ export async function sendChat(userText: string): Promise<ChatReply> {
     await appendMessage(message.role as 'user' | 'assistant', message.content)
   }
   await maybeSummarize().catch((error: unknown) => console.error('Résumé de conversation échoué', error))
+  await extractMemoryFacts(userText, text).catch((error: unknown) =>
+    console.error('Extraction mémoire échouée', error)
+  )
 
   return { text, model, taskActions }
 }

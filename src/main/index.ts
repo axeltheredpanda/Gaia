@@ -7,6 +7,7 @@ import { is } from '@electron-toolkit/utils'
 import { registerChatIpc } from './ipc/chat'
 import { registerAuthIpc } from './ipc/auth'
 import { registerHudIpc } from './ipc/hud'
+import { registerMemoryIpc } from './ipc/memory'
 import { startHudBadgeRefreshLoop } from './claude/hudBadge'
 
 function createWindow(): void {
@@ -43,6 +44,7 @@ app.whenReady().then(() => {
   registerChatIpc()
   registerAuthIpc()
   registerHudIpc()
+  registerMemoryIpc()
   startHudBadgeRefreshLoop()
   createWindow()
 

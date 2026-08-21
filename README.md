@@ -21,6 +21,8 @@ npm run typecheck
 - [x] Routing de modèle Haiku/Sonnet — heuristique par mots-clés/longueur (spec 4.5), tag visible sous chaque réponse dans le HUD
 - [x] Stockage Supabase — voir "Configuration Supabase" ci-dessous
 - [x] Comportement proactif todo — ajout silencieux (system prompt explicite, spec 4.3) + toast HUD discret sur les créations détectées (Google Tasks et Linear)
+- [x] Correctif ancrage temporel — date/heure fraîches à chaque requête, hors bloc caché (chat + badge HUD)
+- [x] Mémoire continue (core/peripheral) + onboarding + écran profil — voir "Configuration Supabase" ci-dessous
 
 ## Configuration Google Tasks
 
@@ -61,9 +63,10 @@ Optionnel (spec 4.6) — sans ça, le chat fonctionne mais sans persistance entr
 lancements. Une fois `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` renseignés :
 
 ```bash
-# Applique le schéma sur votre projet Supabase (SQL Editor, ou CLI supabase) :
-supabase/migrations/0001_init.sql          # historique, résumé, faits mémoire, cache HUD
-supabase/migrations/0002_vault_secrets.sql # fonctions RPC pour Supabase Vault
+# Applique le schéma sur votre projet Supabase (SQL Editor, ou CLI supabase), dans l'ordre :
+supabase/migrations/0001_init.sql               # historique, résumé, faits mémoire, cache HUD
+supabase/migrations/0002_vault_secrets.sql      # fonctions RPC pour Supabase Vault
+supabase/migrations/0003_memory_facts_tiers.sql # mémoire continue : category/tier/content/updated_at
 ```
 
 Ce que ça active :
@@ -71,10 +74,19 @@ Ce que ça active :
   `conversation_messages` ; au-delà, un résumé Haiku est stocké dans
   `conversation_summary` et injecté dans le system prompt à la place des
   messages hors fenêtre.
-- **Faits mémoire** (`memory_facts`) : bloc compact injecté dans le system
-  prompt. Rien n'écrit encore dans cette table pour l'instant (pas de feature
-  d'extraction automatique de faits dans la spec V1) — c'est prêt à être
-  branché plus tard.
+- **Mémoire continue à deux niveaux** (`memory_facts`, spec 4.8) :
+  - `core` (identité, contexte perso stable) — via l'onboarding premier
+    lancement ou l'écran profil ("Paramètres" dans la sidebar), jamais écrit
+    par l'extraction automatique. Injecté intégralement dans le bloc caché du
+    system prompt.
+  - `peripheral` (préférences, habitudes détectées) — extrait automatiquement
+    par Haiku après chaque échange (sortie forcée via tool use), avec upsert
+    sur un fait proche existant plutôt que duplication. Récupéré par
+    mots-clés (accent-insensible, pas de recherche sémantique en V1) selon le
+    sujet de la requête en cours, injecté hors du bloc caché.
+  - Le chemin d'écriture automatique filtre `tier = 'peripheral'` jusque dans
+    la requête SQL elle-même : il ne peut structurellement jamais toucher un
+    fait `core`, pas seulement par convention de code.
 - **Badge HUD** (`hud_cache`) : rafraîchi en tâche de fond toutes les 12
   minutes (fourchette 10-15 min de la spec) via un appel Haiku qui utilise les
   mêmes outils que le chat (Google Tasks + Linear).
@@ -83,13 +95,19 @@ Ce que ça active :
   survit ainsi aux redémarrages de l'app, plus seulement en mémoire.
 
 Vérifié en local avec un vrai Postgres 16 + PostgREST (pas de mock) : les
-migrations s'appliquent proprement, les opérations CRUD/upsert des quatre
-tables et les deux fonctions RPC ont été exercées via `@supabase/supabase-js`
-exactement comme en production, et le pipeline complet de l'app (chat +
-badge HUD + persistance du token Linear après reconnexion) a été rejoué avec
-Playwright contre cette instance locale. Seul le schéma `vault` lui-même
+migrations s'appliquent proprement (y compris le rename `fact`→`content` et
+le check constraint sur `tier`), les opérations CRUD/upsert de toutes les
+tables et les fonctions RPC ont été exercées via `@supabase/supabase-js`
+exactement comme en production. Le garde-fou core/peripheral a été testé
+directement : une tentative de modifier un fait `core` via le chemin d'écriture
+peripheral affecte bien 0 ligne. Le pipeline complet de l'app (chat, badge
+HUD, onboarding auto-déclenché sans fait core, édition/suppression dans
+l'écran profil, persistance du token Linear après reconnexion) a été rejoué
+avec Playwright contre cette instance locale. Seul le schéma `vault` lui-même
 (propre à Supabase, non installable en local) n'a pas pu être testé
 directement — les fonctions RPC ont été validées avec un schéma `vault` de
 test reproduisant fidèlement les signatures officielles (`vault.create_secret`,
 `vault.update_secret`, `vault.decrypted_secrets`), vérifiées via la doc et le
-code source de `supabase/vault`.
+code source de `supabase/vault`. De même, les appels Haiku réels (extraction
+et parsing du profil) sont non vérifiés faute de clé Anthropic disponible ici
+— seule leur intégration (IPC, erreurs, structure de la requête tool-use) l'est.

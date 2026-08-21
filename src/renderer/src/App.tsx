@@ -134,6 +134,130 @@ function Toasts({ toasts }: { toasts: Toast[] }): React.JSX.Element {
   )
 }
 
+type CoreFact = { id: number; category: string | null; content: string }
+
+/** Écran profil (paramètres) et onboarding premier lancement — même composant, spec : réutilisation. */
+function ProfileScreen({
+  isOnboarding,
+  onClose
+}: {
+  isOnboarding: boolean
+  onClose: () => void
+}): React.JSX.Element {
+  const [facts, setFacts] = useState<CoreFact[]>([])
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editValue, setEditValue] = useState('')
+  const [freeText, setFreeText] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function refresh(): Promise<void> {
+    setFacts(await window.gaia.memory.getCoreFacts())
+  }
+
+  useEffect(() => {
+    refresh()
+  }, [])
+
+  async function handleDelete(id: number): Promise<void> {
+    await window.gaia.memory.deleteFact(id)
+    await refresh()
+  }
+
+  async function handleSaveEdit(fact: CoreFact): Promise<void> {
+    await window.gaia.memory.upsertCoreFact({ id: fact.id, category: fact.category, content: editValue })
+    setEditingId(null)
+    await refresh()
+  }
+
+  async function handleSaveFreeText(): Promise<void> {
+    const text = freeText.trim()
+    if (!text || isSaving) return
+    setIsSaving(true)
+    setError(null)
+    try {
+      await window.gaia.memory.parseFreeText(text)
+      setFreeText('')
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur inconnue')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <div className="profile-overlay">
+      <div className="profile-panel">
+        <h2>PROFIL</h2>
+        {isOnboarding && (
+          <p>
+            Bienvenue — dis-moi qui tu es, ce que tu fais, tes projets en cours et ton contexte perso pour
+            que Gaia s&apos;en souvienne d&apos;une conversation à l&apos;autre.
+          </p>
+        )}
+
+        {facts.length > 0 && (
+          <div>
+            {facts.map((fact) =>
+              editingId === fact.id ? (
+                <div key={fact.id} className="profile-fact">
+                  <span className="category">{fact.category}</span>
+                  <input
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={() => handleSaveEdit(fact)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit(fact)}
+                    autoFocus
+                  />
+                </div>
+              ) : (
+                <div
+                  key={fact.id}
+                  className="profile-fact"
+                  onClick={() => {
+                    setEditingId(fact.id)
+                    setEditValue(fact.content)
+                  }}
+                >
+                  <span className="category">{fact.category}</span>
+                  <span style={{ flex: 1 }}>{fact.content}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleDelete(fact.id)
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )
+            )}
+          </div>
+        )}
+
+        <textarea
+          className="profile-textarea"
+          placeholder="Voici qui je suis..."
+          value={freeText}
+          onChange={(e) => setFreeText(e.target.value)}
+        />
+        {error && <p style={{ color: '#e86a5c' }}>⚠ {error}</p>}
+
+        <div className="profile-actions">
+          <button type="button" onClick={onClose}>
+            {isOnboarding ? 'Plus tard' : 'Fermer'}
+          </button>
+          <button type="button" className="primary" onClick={handleSaveFreeText} disabled={isSaving}>
+            {isSaving ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function App(): React.JSX.Element {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -143,10 +267,13 @@ export default function App(): React.JSX.Element {
   const [linearConnected, setLinearConnected] = useState(false)
   const [hudBadge, setHudBadge] = useState<string | null>(null)
   const [activeModel, setActiveModel] = useState<string | null>(null)
+  const [showProfile, setShowProfile] = useState(false)
+  const [isOnboarding, setIsOnboarding] = useState(false)
 
   useEffect(() => {
     window.gaia.auth.linear.status().then(setLinearConnected)
     window.gaia.hud.badge().then(setHudBadge)
+    window.gaia.memory.hasCoreFacts().then((has) => setIsOnboarding(!has))
   }, [])
 
   function pushToasts(labels: string[]): void {
@@ -252,13 +379,13 @@ export default function App(): React.JSX.Element {
           </div>
 
           <div className="section-label">SYSTÈME</div>
-          <div className="nav-item">
+          <button type="button" className="nav-item" onClick={() => setShowProfile(true)}>
             <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.6">
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.7 1.7 0 00.34 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.87-.34 1.7 1.7 0 00-1.04 1.56V21a2 2 0 01-4 0v-.09A1.7 1.7 0 008.96 19a1.7 1.7 0 00-1.87.34l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.7 1.7 0 00.34-1.87 1.7 1.7 0 00-1.56-1.04H3a2 2 0 010-4h.09A1.7 1.7 0 004.6 8.6a1.7 1.7 0 00-.34-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06a1.7 1.7 0 001.87.34H9a1.7 1.7 0 001.04-1.56V3a2 2 0 014 0v.09a1.7 1.7 0 001.04 1.56 1.7 1.7 0 001.87-.34l.06-.06a2 2 0 112.83 2.83l-.06.06a1.7 1.7 0 00-.34 1.87V9a1.7 1.7 0 001.56 1.04H21a2 2 0 010 4h-.09a1.7 1.7 0 00-1.56 1.04z" />
             </svg>
             Paramètres
-          </div>
+          </button>
         </div>
 
         <div className="main">
@@ -301,6 +428,16 @@ export default function App(): React.JSX.Element {
       </div>
 
       <Toasts toasts={toasts} />
+
+      {(showProfile || isOnboarding) && (
+        <ProfileScreen
+          isOnboarding={isOnboarding && !showProfile}
+          onClose={() => {
+            setShowProfile(false)
+            setIsOnboarding(false)
+          }}
+        />
+      )}
     </>
   )
 }

@@ -59,14 +59,36 @@ Si l'heuristique se révèle insuffisante en usage réel, ajouter un classificat
 
 ### 4.6 Assemblage du contexte à chaque requête
 
-- **System prompt statique et caché** (prompt caching Anthropic) : persona, comportement proactif todo, style de réponse, plus un bloc mémoire compact des faits durables sur l'utilisateur (pas l'historique brut).
+- **System prompt statique et caché** (prompt caching Anthropic) : persona, comportement proactif todo, style de réponse, plus le bloc des faits mémoire **tier = core** (voir 4.9) — tout ce bloc est stable et regroupé dans le seul segment marqué `cache_control`.
+- **Date et heure** : une ligne « Nous sommes le [date] à [heure] », recalculée à chaque requête et injectée **hors** du bloc caché (jamais de `cache_control` sur ce segment), sans quoi elle se fige au moment de la création du cache. Instruction explicite dans le prompt système : comparer toujours les échéances à cette date, une date antérieure n'est jamais « prochaine » ni « à venir ». Même traitement pour le prompt du badge HUD (4.6 suivant), qui n'a pas de bloc caché du tout mais doit recevoir la même ligne fraîche à chaque rafraîchissement.
 - **Cache HUD séparé** : badge léger (ex. « 3 tâches aujourd'hui ») visible dès l'ouverture de l'appli, rafraîchi en tâche de fond toutes les 10-15 minutes, stocké dans Supabase, indépendant du prompt système.
 - **Historique de conversation en fenêtre glissante** : les 15-20 derniers messages tels quels ; au-delà, résumé périodique via un call Haiku, stocké dans Supabase.
+- **Faits mémoire tier = peripheral pertinents au sujet en cours** : récupérés par mots-clés (voir 4.9), injectés en dehors du bloc caché puisqu'ils varient à chaque requête.
 - **Secrets OAuth** (Linear, Google) : stockés dans Supabase Vault, jamais en clair dans une table classique.
 
 ### 4.7 Authentification
 
 Flow OAuth dans Electron via popup + redirect local (pour Linear et Google).
+
+### 4.8 Mémoire continue
+
+Le contexte todo (Linear, Google Tasks) est du temps réel récupéré à la demande, jamais stocké. La mémoire continue est différente : des faits sur l'utilisateur qui persistent d'une conversation à l'autre (préférences, projets, habitudes, personnes qu'il mentionne), stockés dans `memory_facts` (Supabase) :
+
+- `id`, `category` (texte libre : travail, habitudes, personnes, préférences, projets…), `tier` (`core` | `peripheral`), `content`, `created_at`, `updated_at`.
+
+**Écriture (extraction continue)** : après chaque échange, un call Haiku relit l'échange et les faits `peripheral` pertinents existants (même retrieval par mots-clés que la lecture), et décide s'il y a un fait durable à ajouter ou mettre à jour — toujours upsert sur un fait proche existant plutôt que dupliquer (le call fournit son id pour une mise à jour, l'omet pour une création ; c'est le modèle qui juge la similarité, pas un algorithme de similarité maison). Sortie forcée via tool use pour un résultat structuré fiable. N'écrit **jamais** que du tier `peripheral` — le code applique un filtre `tier = 'peripheral'` sur la requête d'écriture elle-même, pas seulement par convention, donc ce chemin ne peut structurellement jamais toucher un fait `core`.
+
+**Lecture (deux niveaux)** :
+- `core` : injecté intégralement et systématiquement dans le bloc caché du system prompt (voir 4.6), jamais filtré, jamais omis.
+- `peripheral` : récupéré par mots-clés simples selon le sujet de la requête en cours — matching basique (normalisation des accents, filtrage des mots courants, substring), pas de recherche sémantique/pgvector pour cette V1. À revoir si le mot-clé s'avère insuffisant à l'usage.
+
+**Règle des tiers (stricte)** : `core` vient exclusivement de l'onboarding et des éditions manuelles du profil ; `peripheral` vient exclusivement de l'extraction automatique. Pas de promotion automatique `peripheral` → `core` pour cette V1.
+
+### 4.9 Onboarding et profil
+
+Premier lancement détecté par l'absence de tout fait `tier = core` en base. Un écran (même composant que l'écran profil ci-dessous, cadrage différent) invite l'utilisateur à décrire qui il est, ce qu'il fait, ses projets en cours et son contexte personnel pertinent, en texte libre — un call Haiku (sortie forcée, structurée) découpe ce texte en faits distincts, toujours écrits en `tier = core`. Fermeture non bloquante (« Plus tard ») : l'app reste utilisable sans onboarding complété.
+
+Le même écran, accessible depuis « Paramètres » dans la sidebar, liste tous les faits `core` connus, avec édition en ligne et suppression individuelle, plus la même zone de texte libre pour en ajouter.
 
 ## 5. Interface (HUD)
 
@@ -78,3 +100,5 @@ Référence visuelle : capture d'écran fournie par l'utilisateur (fenêtre somb
 - Budget global (pas encore tranché)
 - Design HUD détaillé
 - Modalités exactes du fallback Sonnet si l'heuristique de routing échoue trop souvent
+- Retrieval `peripheral` par mots-clés (4.8) : passer à une recherche sémantique/pgvector si le matching simple s'avère insuffisant à l'usage
+- Promotion `peripheral` → `core` : aucune pour cette V1, à réévaluer si des faits peripheral s'avèrent en pratique aussi durables que des faits core
