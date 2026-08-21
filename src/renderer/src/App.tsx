@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 type Message = { role: 'user' | 'assistant'; text: string }
 
@@ -12,10 +12,39 @@ function Sphere(): React.JSX.Element {
 }
 
 function Sidebar(): React.JSX.Element {
+  const [linearConnected, setLinearConnected] = useState(false)
+  const [isConnecting, setIsConnecting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    window.gaia.auth.linear.status().then(setLinearConnected)
+  }, [])
+
+  async function handleConnectLinear(): Promise<void> {
+    setIsConnecting(true)
+    setError(null)
+    try {
+      await window.gaia.auth.linear.connect()
+      setLinearConnected(await window.gaia.auth.linear.status())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur inconnue')
+    } finally {
+      setIsConnecting(false)
+    }
+  }
+
   return (
     <aside className="flex w-56 flex-col gap-3 border-r border-white/5 p-4 text-sm text-white/50">
       <span className="text-xs uppercase tracking-widest text-cyan-400/70">Gaia</span>
-      <span>Contrôles à venir</span>
+      <button
+        type="button"
+        onClick={handleConnectLinear}
+        disabled={linearConnected || isConnecting}
+        className="rounded-lg border border-white/10 px-3 py-2 text-left text-white/70 hover:border-cyan-400/40 disabled:opacity-50"
+      >
+        {linearConnected ? '✓ Linear connecté' : isConnecting ? 'Connexion…' : 'Connecter Linear'}
+      </button>
+      {error && <span className="text-xs text-red-400">⚠ {error}</span>}
     </aside>
   )
 }

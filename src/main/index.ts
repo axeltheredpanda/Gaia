@@ -5,6 +5,7 @@ import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'node:path'
 import { is } from '@electron-toolkit/utils'
 import { registerChatIpc } from './ipc/chat'
+import { registerAuthIpc } from './ipc/auth'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -37,6 +38,7 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   registerChatIpc()
+  registerAuthIpc()
   createWindow()
 
   app.on('activate', () => {

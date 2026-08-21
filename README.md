@@ -15,7 +15,7 @@ npm run typecheck
 
 - [x] Squelette Electron + React + Tailwind, HUD placeholder (sphère, sidebar, barre de saisie)
 - [x] Chat texte basique avec l'API Claude (+ `web_search` natif) — nécessite `ANTHROPIC_API_KEY` dans `.env`
-- [ ] MCP Linear
+- [x] MCP Linear — bouton "Connecter Linear" (OAuth 2.1 + PKCE + enregistrement dynamique de client) ou `LINEAR_API_KEY` en raccourci de test. Flow OAuth non vérifié en conditions réelles (réseau de développement sans accès à `mcp.linear.app`) — à valider avec un vrai compte Linear.
 - [ ] MCP Google Tasks
 - [ ] Routing de modèle Haiku/Sonnet
 - [ ] Stockage Supabase
