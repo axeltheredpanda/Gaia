@@ -6,6 +6,7 @@ import { getGoogleTasksTools, callGoogleTasksTool } from '../mcp/googleTasksClie
 import { searchImage } from '../tools/imageSearch'
 import { getWeather } from '../tools/weather'
 import { getNews } from '../tools/news'
+import { captureScreenshot } from '../tools/screenshot'
 import { emitHudState } from '../hud/hudState'
 
 const MAX_TOOL_ITERATIONS = 5
@@ -40,6 +41,17 @@ const GET_NEWS_TOOL: Anthropic.Beta.BetaTool = {
   input_schema: { type: 'object', properties: {} }
 }
 
+const CAPTURE_SCREENSHOT_TOOL: Anthropic.Beta.BetaTool = {
+  name: 'capture_screenshot',
+  description:
+    "Capture l'écran d'Axel à sa demande explicite (« montre-moi ce qui est affiché », « qu'est-ce qu'il y a sur mon écran »). Ne JAMAIS l'utiliser sans demande explicite. Choisis 'active_window' si Axel parle d'une fenêtre/appli précise, 'screen' pour l'écran entier.",
+  input_schema: {
+    type: 'object',
+    properties: { target: { type: 'string', enum: ['active_window', 'screen'] } },
+    required: ['target']
+  }
+}
+
 export interface ToolLoopOptions {
   model: string
   maxTokens: number
@@ -47,6 +59,8 @@ export interface ToolLoopOptions {
   includeWebSearch?: boolean
   includeImageSearch?: boolean
   includeBriefingTools?: boolean
+  /** Jamais activé pour le job de badge HUD en tâche de fond — capture strictement à la demande (spec 8.7). */
+  includeScreenshotTool?: boolean
   /** Uniquement pour un appel déclenché par l'utilisateur — le rafraîchissement du badge HUD en tâche de fond ne doit jamais faire clignoter l'état "thinking" à l'insu de l'utilisateur. */
   emitHudEvents?: boolean
 }
@@ -62,14 +76,22 @@ function clientToolLabel(name: string): string {
   if (name === 'search_image') return 'Recherche une image...'
   if (name === 'get_weather') return 'Consulte la météo...'
   if (name === 'get_news') return "Consulte l'actualité..."
+  if (name === 'capture_screenshot') return "Capture l'écran..."
   return 'Consulte Google Tasks...'
+}
+
+interface ClientToolResult {
+  text: string
+  imageDataUri?: string
+  /** search_image est affiché à l'utilisateur mais pas redécrit par le modèle ; capture_screenshot doit au contraire être "vu" pour répondre aux questions dessus. */
+  feedImageToModel?: boolean
 }
 
 async function executeClientTool(
   name: string,
   input: Record<string, unknown>,
   emitEvents: boolean
-): Promise<{ text: string; imageDataUri?: string }> {
+): Promise<ClientToolResult> {
   if (emitEvents) emitHudState('thinking', clientToolLabel(name))
   if (name === 'search_image') {
     const result = await searchImage(input.query as string)
@@ -77,7 +99,22 @@ async function executeClientTool(
   }
   if (name === 'get_weather') return { text: await getWeather(input.city as string) }
   if (name === 'get_news') return { text: await getNews() }
+  if (name === 'capture_screenshot') {
+    const result = await captureScreenshot(input.target as 'active_window' | 'screen')
+    return { text: result.text, imageDataUri: result.imageDataUri, feedImageToModel: true }
+  }
   return { text: await callGoogleTasksTool(name, input) }
+}
+
+type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+
+function imageBlockFromDataUri(dataUri: string): Anthropic.Beta.BetaImageBlockParam {
+  const match = dataUri.match(/^data:(image\/\w+);base64,(.+)$/)
+  if (!match) throw new Error('Data URI image invalide')
+  return {
+    type: 'image',
+    source: { type: 'base64', media_type: match[1] as ImageMediaType, data: match[2] }
+  }
 }
 
 /**
@@ -100,6 +137,7 @@ export async function runToolLoop(
   if (options.includeWebSearch) tools.push({ type: 'web_search_20250305' as const, name: 'web_search' as const })
   if (options.includeImageSearch) tools.push(SEARCH_IMAGE_TOOL)
   if (options.includeBriefingTools) tools.push(GET_WEATHER_TOOL, GET_NEWS_TOOL)
+  if (options.includeScreenshotTool) tools.push(CAPTURE_SCREENSHOT_TOOL)
 
   const working = [...messages]
   const taskActions: string[] = []
@@ -144,7 +182,11 @@ export async function runToolLoop(
     const toolResults: Anthropic.Beta.BetaToolResultBlockParam[] = []
     for (const toolUse of toolUseBlocks) {
       const result = await executeClientTool(toolUse.name, toolUse.input as Record<string, unknown>, emitEvents)
-      toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: result.text })
+      const content =
+        result.feedImageToModel && result.imageDataUri
+          ? [imageBlockFromDataUri(result.imageDataUri), { type: 'text' as const, text: result.text }]
+          : result.text
+      toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content })
       if (result.imageDataUri) imageDataUri = result.imageDataUri
     }
     working.push({ role: 'user', content: toolResults })

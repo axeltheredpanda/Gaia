@@ -53,6 +53,7 @@ export async function sendChat(userText: string, attachments?: Attachment[]): Pr
     includeWebSearch: true,
     includeImageSearch: true,
     includeBriefingTools: true,
+    includeScreenshotTool: true,
     emitHudEvents: true
   })
 

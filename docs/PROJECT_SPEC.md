@@ -150,6 +150,12 @@ Détection d'une URL dans le message (`src/main/tools/webPage.ts`) : le main pro
 
 ### 8.7 Capture d'écran à la demande
 
+Nouveau tool client `capture_screenshot` (`src/main/tools/screenshot.ts`), ajouté uniquement à la boucle de chat interactive (`includeScreenshotTool: true` dans `chat.ts`) — jamais au job de badge HUD en tâche de fond, garantissant qu'il ne peut structurellement jamais se déclencher hors d'une demande explicite d'Axel. Le modèle choisit `active_window` ou `screen` selon la formulation d'Axel (paramètre du tool, pas de parsing regex fragile côté app). `Electron.desktopCapturer` fournit l'image ; contrairement à `search_image` (affichage seul), l'image est ici renvoyée au modèle comme bloc `image` dans le `tool_result` — Axel peut poser des questions sur le contenu de la capture. Aucune source disponible (permission macOS manquante ou refusée) → message de repli explicite indiquant Réglages → Confidentialité et sécurité → Enregistrement d'écran.
+
+**Limite documentée** : pas d'API Electron multiplateforme pour identifier « la fenêtre active » — la première source retournée par `desktopCapturer` (généralement la plus récemment au premier plan) est utilisée par convention.
+
+### 8.8 Écran paramètres complet
+
 À venir.
 
 ### 8.8 Écran paramètres complet
