@@ -146,7 +146,7 @@ Même mécanisme de drop/paste que la vision (8.4), même chip de prévisualisat
 
 ### 8.6 Résumé de page web
 
-À venir.
+Détection d'une URL dans le message (`src/main/tools/webPage.ts`) : le main process fetch la page lui-même (jamais le tool `fetch` natif de l'API), extrait le contenu lisible via `@mozilla/readability` + `jsdom`, et préfixe le texte extrait au message avant l'appel Claude (`chat.ts`) — le modèle reçoit du texte brut, charge à lui de résumer selon la demande d'Axel. Contenu tronqué à 6000 caractères pour ne pas gonfler le contexte. Échec de fetch/extraction : message de repli explicite plutôt qu'une exception, jamais bloquant pour le reste de la requête.
 
 ### 8.7 Capture d'écran à la demande
 

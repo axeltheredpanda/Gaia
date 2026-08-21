@@ -7,6 +7,7 @@ import { extractMemoryFacts } from './memoryExtraction'
 import { appendMessage, loadRecentHistory, getConversationSummary, maybeSummarize } from '../supabase/history'
 import { getCoreFactsBlock, getPeripheralFactsBlock } from '../supabase/memory'
 import { buildUserContent, type Attachment } from './attachments'
+import { extractPageForUrl } from '../tools/webPage'
 
 export interface ChatReply {
   text: string
@@ -35,9 +36,15 @@ export async function sendChat(userText: string, attachments?: Attachment[]): Pr
   if (peripheralBlock) system.push({ type: 'text', text: `Faits potentiellement pertinents :\n${peripheralBlock}` })
   if (summary) system.push({ type: 'text', text: `Résumé de la conversation précédente :\n${summary}` })
 
+  const pageContext = await extractPageForUrl(userText).catch((error: unknown) => {
+    console.error('Extraction de page web échouée', error)
+    return null
+  })
+  const contentText = pageContext ? `${pageContext}\n\n${userText}` : userText
+
   const userMessage: Anthropic.Beta.BetaMessageParam = {
     role: 'user',
-    content: buildUserContent(userText, attachments)
+    content: buildUserContent(contentText, attachments)
   }
   const { text, messages, taskActions, imageDataUri } = await runToolLoop([...history, userMessage], {
     model,

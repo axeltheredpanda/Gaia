@@ -30,6 +30,7 @@ npm run typecheck
 - [x] Google Calendar (spec 8.3) — `mcp_servers`, OAuth classique + PKCE (pas de DCR côté Google, contrairement à Linear), croisement Calendar/Tasks dans le system prompt
 - [x] Vision (spec 8.4) — glisser-déposer/coller une image, content block natif, vérifié avec de vrais événements paste/drop et un vrai fichier image
 - [x] Lecture PDF/DOCX (spec 8.5) — PDF en content block `document` natif, DOCX extrait côté renderer via `mammoth` et fusionné dans le message texte ; vérifié avec un vrai `.pdf` et un vrai `.docx` (chip + extraction + soumission bout en bout via Playwright)
+- [x] Résumé de page web (spec 8.6) — détection d'URL dans le message, fetch + extraction `@mozilla/readability`/`jsdom` côté main process (jamais le tool `fetch` natif de l'API) ; vérifié avec un fetch simulé (page valide, page 404, erreur réseau) et en conditions réelles dans l'app buildée (le fetch réseau échoue proprement dans ce sandbox, sans bloquer la requête)
 
 ## Configuration Google Tasks
 
