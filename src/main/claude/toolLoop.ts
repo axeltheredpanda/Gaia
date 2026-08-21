@@ -1,8 +1,12 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { getClaudeClient } from './client'
 import { getLinearMcpServer } from '../mcp/linear'
+import { getGoogleCalendarMcpServer } from '../mcp/googleCalendar'
 import { getGoogleTasksTools, callGoogleTasksTool } from '../mcp/googleTasksClient'
 import { searchImage } from '../tools/imageSearch'
+import { getWeather } from '../tools/weather'
+import { getNews } from '../tools/news'
+import { emitHudState } from '../hud/hudState'
 
 const MAX_TOOL_ITERATIONS = 5
 
@@ -19,12 +23,32 @@ const SEARCH_IMAGE_TOOL: Anthropic.Beta.BetaTool = {
   }
 }
 
+const GET_WEATHER_TOOL: Anthropic.Beta.BetaTool = {
+  name: 'get_weather',
+  description:
+    "Météo actuelle et du jour pour une ville. Déduis la ville du contexte utilisateur disponible (faits durables, ville indiquée explicitement) si Axel ne la précise pas.",
+  input_schema: {
+    type: 'object',
+    properties: { city: { type: 'string', description: 'Nom de la ville' } },
+    required: ['city']
+  }
+}
+
+const GET_NEWS_TOOL: Anthropic.Beta.BetaTool = {
+  name: 'get_news',
+  description: "Derniers titres d'actualité (tech, finance, actu générale).",
+  input_schema: { type: 'object', properties: {} }
+}
+
 export interface ToolLoopOptions {
   model: string
   maxTokens: number
   system?: Anthropic.Beta.BetaTextBlockParam[]
   includeWebSearch?: boolean
   includeImageSearch?: boolean
+  includeBriefingTools?: boolean
+  /** Uniquement pour un appel déclenché par l'utilisateur — le rafraîchissement du badge HUD en tâche de fond ne doit jamais faire clignoter l'état "thinking" à l'insu de l'utilisateur. */
+  emitHudEvents?: boolean
 }
 
 export interface ToolLoopResult {
@@ -34,14 +58,25 @@ export interface ToolLoopResult {
   imageDataUri: string | null
 }
 
+function clientToolLabel(name: string): string {
+  if (name === 'search_image') return 'Recherche une image...'
+  if (name === 'get_weather') return 'Consulte la météo...'
+  if (name === 'get_news') return "Consulte l'actualité..."
+  return 'Consulte Google Tasks...'
+}
+
 async function executeClientTool(
   name: string,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  emitEvents: boolean
 ): Promise<{ text: string; imageDataUri?: string }> {
+  if (emitEvents) emitHudState('thinking', clientToolLabel(name))
   if (name === 'search_image') {
     const result = await searchImage(input.query as string)
     return { text: result.toolResultText, imageDataUri: result.imageDataUri }
   }
+  if (name === 'get_weather') return { text: await getWeather(input.city as string) }
+  if (name === 'get_news') return { text: await getNews() }
   return { text: await callGoogleTasksTool(name, input) }
 }
 
@@ -56,18 +91,24 @@ export async function runToolLoop(
   options: ToolLoopOptions
 ): Promise<ToolLoopResult> {
   const client = getClaudeClient()
-  const mcpServers = [await getLinearMcpServer()].filter((server) => server !== null)
+  const mcpServers = (await Promise.all([getLinearMcpServer(), getGoogleCalendarMcpServer()])).filter(
+    (server) => server !== null
+  )
   const googleTasksTools = await getGoogleTasksTools().catch(() => [])
 
   const tools: Anthropic.Beta.BetaToolUnion[] = [...googleTasksTools]
   if (options.includeWebSearch) tools.push({ type: 'web_search_20250305' as const, name: 'web_search' as const })
   if (options.includeImageSearch) tools.push(SEARCH_IMAGE_TOOL)
+  if (options.includeBriefingTools) tools.push(GET_WEATHER_TOOL, GET_NEWS_TOOL)
 
   const working = [...messages]
   const taskActions: string[] = []
   let imageDataUri: string | null = null
 
+  const emitEvents = options.emitHudEvents ?? false
+
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+    if (emitEvents) emitHudState('thinking')
     const response = await client.beta.messages.create({
       model: options.model,
       max_tokens: options.maxTokens,
@@ -92,6 +133,7 @@ export async function runToolLoop(
     }
 
     if (toolUseBlocks.length === 0) {
+      if (emitEvents) emitHudState('responding')
       const text = response.content
         .filter((block) => block.type === 'text')
         .map((block) => block.text)
@@ -101,7 +143,7 @@ export async function runToolLoop(
 
     const toolResults: Anthropic.Beta.BetaToolResultBlockParam[] = []
     for (const toolUse of toolUseBlocks) {
-      const result = await executeClientTool(toolUse.name, toolUse.input as Record<string, unknown>)
+      const result = await executeClientTool(toolUse.name, toolUse.input as Record<string, unknown>, emitEvents)
       toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: result.text })
       if (result.imageDataUri) imageDataUri = result.imageDataUri
     }

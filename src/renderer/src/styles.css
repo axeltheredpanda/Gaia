@@ -214,6 +214,35 @@ body {
   border: 1px solid var(--accent-border);
 }
 
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 24px 8px;
+  justify-content: center;
+}
+.attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+.attachment-chip button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+.attachment-chip button:hover {
+  color: var(--accent);
+}
+
 .inputbar {
   display: flex;
   align-items: center;

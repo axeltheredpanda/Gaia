@@ -108,3 +108,50 @@ Référence visuelle : capture d'écran fournie par l'utilisateur (fenêtre somb
 - Modalités exactes du fallback Sonnet si l'heuristique de routing échoue trop souvent
 - Retrieval `peripheral` par mots-clés (4.8) : passer à une recherche sémantique/pgvector si le matching simple s'avère insuffisant à l'usage
 - Promotion `peripheral` → `core` : aucune pour cette V1, à réévaluer si des faits peripheral s'avèrent en pratique aussi durables que des faits core
+
+## 8. Fonctionnalités additionnelles
+
+### 8.1 Briefing proactif météo/actu
+
+Étend le job Haiku existant du badge HUD (`src/main/claude/hudBadge.ts`, toutes les 12 min) plutôt qu'un mécanisme séparé : deux tools client (`get_weather`, `get_news`) ajoutés à la même boucle d'outils que le reste (`toolLoop.ts`), disponibles aussi bien pour ce job que pour le chat interactif.
+
+- **Météo** : Open-Meteo, gratuit sans clé — géocodage (`geocoding-api.open-meteo.com`) puis prévisions (`api.open-meteo.com`). Ville par défaut déduite des faits `core` du profil (injectés dans le prompt du job), avec possibilité de forcer une ville via `app_settings.weather_city_override` (écran paramètres, 8.8).
+- **Actu** : `rss-parser`, gratuit sans clé, un titre par flux sur trois flux par défaut (tech, finance, actu générale), remplaçables via `app_settings.rss_feeds`.
+- Nouvelle table `app_settings` (migration 0004) — une seule ligne, réglages simples, pas de gestion multi-profil.
+
+### 8.2 États HUD différenciés
+
+Un seul flux d'événements (`hud:state`, poussé du main vers le renderer via `webContents.send`, jamais de polling) pilote à la fois le label texte et l'intensité de l'animation du réseau de particules — pas deux systèmes séparés. États : `idle`, `listening` (bascule micro, purement local — pas d'ASR réelle avant la V2), `thinking` (avant chaque appel API, avec un libellé détaillé pour les tools exécutés côté client : "Consulte la météo...", "Recherche une image...", etc.), `responding` (réponse finale prête). Gardé à l'écart du rafraîchissement du badge HUD en tâche de fond (`emitHudEvents` désactivé par défaut dans `toolLoop.ts`) pour ne jamais faire clignoter l'état à l'insu de l'utilisateur toutes les 12 minutes.
+
+**Limite technique assumée** : Linear et `web_search` s'exécutent côté serveur Anthropic à l'intérieur d'un seul appel API — impossible d'avoir un signal "en cours" pendant leur exécution propre, seul le "thinking" générique avant l'appel les couvre. Le libellé détaillé par tool n'est donc précis que pour les tools exécutés côté client (Google Tasks, recherche d'image, météo, actu).
+
+### 8.3 Google Calendar
+
+`mcp_servers`, comme Linear, pas de subprocess local (`https://calendarmcp.googleapis.com/mcp/v1`, vérifié avant d'écrire le code, pas supposé).
+
+**Déviation par rapport au texte de la spec** : contrairement à Linear, les serveurs MCP Google ne supportent pas l'enregistrement dynamique de client (DCR) — vérifié via la documentation Google avant d'implémenter. Il faut donc un client OAuth Google Cloud pré-enregistré (type "Desktop app", `GOOGLE_CALENDAR_CLIENT_ID`/`GOOGLE_CALENDAR_CLIENT_SECRET`), flow d'autorisation classique + PKCE au lieu du DCR de Linear — même infra de popup + serveur de callback local réutilisée (`src/main/auth/`). Scopes lecture seule (`calendar.events.readonly`, `calendar.calendarlist.readonly`) : la spec ne demande que de croiser/lire, pas d'écrire dans Calendar. `access_type=offline` + `prompt=consent` pour obtenir un refresh_token, avec rafraîchissement automatique du token d'accès (contrairement à Linear où le token stocké n'est pas rafraîchi).
+
+Le system prompt (`systemPrompt.ts`) instruit explicitement de croiser Calendar et les todos (Google Tasks, Linear) pour toute question de planning, jamais une seule source si les autres sont accessibles.
+
+### 8.4 Vision
+
+Glisser-déposer et coller une image dans le HUD (zone `.main` pour le drop, l'input pour le paste) — conversion en base64 côté renderer (`FileReader`), envoyée comme content block `image` natif de l'API Claude (`src/main/claude/attachments.ts`), pas de traitement côté main avant l'appel API. Aperçu sous forme de chip au-dessus de la barre de saisie, supprimable avant envoi.
+
+### 8.5 Lecture PDF/DOCX
+
+Même mécanisme de drop/paste que la vision (8.4), même chip de prévisualisation.
+
+- **PDF** : content block `document` natif de l'API Claude (`src/main/claude/attachments.ts`) — aucun traitement supplémentaire, l'API l'accepte directement en base64.
+- **DOCX** : l'API n'accepte pas ce format nativement. Extraction du texte côté renderer via `mammoth` (`extractRawText`, gratuit, tourne dans le navigateur — build `browser/` du paquet, résolu automatiquement par Vite via son champ `package.json#browser`) avant l'envoi ; le texte extrait est fusionné dans le message texte (`[Contenu de fichier.docx]\n...`) plutôt qu'envoyé comme content block séparé, puisqu'il n'y a pas de bloc dédié pour du texte pré-extrait.
+
+### 8.6 Résumé de page web
+
+À venir.
+
+### 8.7 Capture d'écran à la demande
+
+À venir.
+
+### 8.8 Écran paramètres complet
+
+À venir.

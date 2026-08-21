@@ -6,6 +6,7 @@ import { runToolLoop } from './toolLoop'
 import { extractMemoryFacts } from './memoryExtraction'
 import { appendMessage, loadRecentHistory, getConversationSummary, maybeSummarize } from '../supabase/history'
 import { getCoreFactsBlock, getPeripheralFactsBlock } from '../supabase/memory'
+import { buildUserContent, type Attachment } from './attachments'
 
 export interface ChatReply {
   text: string
@@ -14,7 +15,7 @@ export interface ChatReply {
   imageDataUri: string | null
 }
 
-export async function sendChat(userText: string): Promise<ChatReply> {
+export async function sendChat(userText: string, attachments?: Attachment[]): Promise<ChatReply> {
   const model = routeModel(userText)
   const history = await loadRecentHistory()
   const [summary, coreBlock, peripheralBlock] = await Promise.all([
@@ -34,13 +35,18 @@ export async function sendChat(userText: string): Promise<ChatReply> {
   if (peripheralBlock) system.push({ type: 'text', text: `Faits potentiellement pertinents :\n${peripheralBlock}` })
   if (summary) system.push({ type: 'text', text: `Résumé de la conversation précédente :\n${summary}` })
 
-  const userMessage: Anthropic.Beta.BetaMessageParam = { role: 'user', content: userText }
+  const userMessage: Anthropic.Beta.BetaMessageParam = {
+    role: 'user',
+    content: buildUserContent(userText, attachments)
+  }
   const { text, messages, taskActions, imageDataUri } = await runToolLoop([...history, userMessage], {
     model,
     maxTokens: 1024,
     system,
     includeWebSearch: true,
-    includeImageSearch: true
+    includeImageSearch: true,
+    includeBriefingTools: true,
+    emitHudEvents: true
   })
 
   const newMessages = messages.slice(history.length)

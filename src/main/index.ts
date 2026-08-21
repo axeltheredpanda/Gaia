@@ -9,6 +9,7 @@ import { registerAuthIpc } from './ipc/auth'
 import { registerHudIpc } from './ipc/hud'
 import { registerMemoryIpc } from './ipc/memory'
 import { startHudBadgeRefreshLoop } from './claude/hudBadge'
+import { registerHudStateWindow } from './hud/hudState'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -27,6 +28,8 @@ function createWindow(): void {
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
   })
+
+  registerHudStateWindow(mainWindow)
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)

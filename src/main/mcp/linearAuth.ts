@@ -138,3 +138,11 @@ export async function getLinearAuthorizationToken(): Promise<string | null> {
 export async function isLinearConnected(): Promise<boolean> {
   return (await getLinearAuthorizationToken()) !== null
 }
+
+/** Ne s'applique qu'au token obtenu via le flow OAuth popup — LINEAR_API_KEY reste actif si défini. */
+export async function disconnectLinear(): Promise<void> {
+  cachedAccessToken = null
+  await setSecret(VAULT_SECRET_NAME, '').catch((error) =>
+    console.error('Effacement du token Linear dans Supabase Vault échoué', error)
+  )
+}

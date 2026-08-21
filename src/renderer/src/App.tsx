@@ -1,8 +1,43 @@
 import { useEffect, useRef, useState } from 'react'
+import { extractRawText } from 'mammoth'
+import type { Attachment } from './gaia.d'
 
 type Message = { role: 'user' | 'assistant'; text: string; model?: string; imageDataUri?: string | null }
 type Toast = { id: number; text: string }
+type PendingItem = (Attachment & { name: string }) | { kind: 'docx'; name: string; text: string }
 let nextToastId = 0
+let nextAttachmentId = 0
+
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+/** Vision (spec 8.4) + PDF natif (spec 8.5, content block API) + DOCX (spec 8.5, mammoth, texte inline). */
+async function fileToPendingItem(file: File): Promise<PendingItem | null> {
+  if (file.type === DOCX_TYPE) {
+    const { value } = await extractRawText({ arrayBuffer: await file.arrayBuffer() })
+    return { kind: 'docx', name: file.name, text: value }
+  }
+
+  const dataUrl = await readFileAsDataUrl(file)
+  const data = dataUrl.slice(dataUrl.indexOf(',') + 1)
+  if (ALLOWED_IMAGE_TYPES.includes(file.type)) {
+    const mediaType = file.type as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+    return { kind: 'image', mediaType, data, name: file.name }
+  }
+  if (file.type === 'application/pdf') {
+    return { kind: 'pdf', data, name: file.name }
+  }
+  return null
+}
 
 function Clock(): React.JSX.Element {
   const [time, setTime] = useState(() => new Date().toLocaleTimeString('fr-FR'))
@@ -13,9 +48,20 @@ function Clock(): React.JSX.Element {
   return <span className="value">{time}</span>
 }
 
-/** Réseau de particules animé — port direct du mockup HUD (canvas 2D, requestAnimationFrame). */
-function NetworkCanvas(): React.JSX.Element {
+const STATE_INTENSITY: Record<string, number> = { idle: 1, listening: 1.15, thinking: 1.8, responding: 1.3 }
+
+/**
+ * Réseau de particules animé — port du mockup HUD (canvas 2D, requestAnimationFrame),
+ * dont la vitesse/pulsation varie avec l'état HUD (spec 8.2) sans redémarrer la simulation :
+ * un ref lu à chaque frame, pas un effet qui réinitialise les nœuds à chaque changement d'état.
+ */
+function NetworkCanvas({ hudState }: { hudState: string }): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const intensityRef = useRef(1)
+
+  useEffect(() => {
+    intensityRef.current = STATE_INTENSITY[hudState] ?? 1
+  }, [hudState])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -55,10 +101,11 @@ function NetworkCanvas(): React.JSX.Element {
       ctx!.clearRect(0, 0, w, h)
       const cx = w / 2
       const cy = h / 2
+      const intensity = intensityRef.current
 
       for (const n of nodes) {
-        n.x += n.vx
-        n.y += n.vy
+        n.x += n.vx * intensity
+        n.y += n.vy * intensity
         const d = Math.hypot(n.x - cx, n.y - cy)
         const maxR = Math.min(w, h) * 0.34
         if (d > maxR) {
@@ -85,14 +132,14 @@ function NetworkCanvas(): React.JSX.Element {
       }
 
       for (const n of nodes) {
-        const pulse = 0.5 + 0.5 * Math.sin(t * 0.0015 + n.phase)
+        const pulse = 0.5 + 0.5 * Math.sin(t * 0.0015 * intensity + n.phase)
         ctx!.fillStyle = `rgba(${accent},${0.4 + pulse * 0.5})`
         ctx!.beginPath()
         ctx!.arc(n.x, n.y, 1.4, 0, Math.PI * 2)
         ctx!.fill()
       }
 
-      const corePulse = 0.6 + 0.4 * Math.sin(t * 0.002)
+      const corePulse = 0.6 + 0.4 * Math.sin(t * 0.002 * intensity)
       const grad = ctx!.createRadialGradient(cx, cy, 0, cx, cy, 40)
       grad.addColorStop(0, `rgba(${accent},${0.25 * corePulse})`)
       grad.addColorStop(1, `rgba(${accent},0)`)
@@ -263,23 +310,46 @@ export default function App(): React.JSX.Element {
   const [input, setInput] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [toasts, setToasts] = useState<Toast[]>([])
-  const [listening, setListening] = useState(false)
+  const [hudState, setHudState] = useState<{ state: string; detail?: string }>({ state: 'idle' })
   const [linearConnected, setLinearConnected] = useState(false)
   const [googleTasksConnected, setGoogleTasksConnected] = useState(false)
+  const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false)
   const [hudBadge, setHudBadge] = useState<string | null>(null)
   const [activeModel, setActiveModel] = useState<string | null>(null)
   const [showProfile, setShowProfile] = useState(false)
   const [isOnboarding, setIsOnboarding] = useState(false)
+  const [pendingAttachments, setPendingAttachments] = useState<(PendingItem & { id: number })[]>([])
+
+  async function addFiles(files: FileList | File[]): Promise<void> {
+    const converted = await Promise.all(Array.from(files).map(fileToPendingItem))
+    const valid = converted.filter((a): a is PendingItem => a !== null)
+    if (valid.length < converted.length) {
+      pushToasts(['⚠ Fichier non supporté (images, PDF et DOCX uniquement)'])
+    }
+    setPendingAttachments((prev) => [...prev, ...valid.map((a) => ({ ...a, id: nextAttachmentId++ }))])
+  }
+
+  function handleDrop(event: React.DragEvent): void {
+    event.preventDefault()
+    if (event.dataTransfer.files.length > 0) void addFiles(event.dataTransfer.files)
+  }
+
+  function handlePaste(event: React.ClipboardEvent): void {
+    const files = Array.from(event.clipboardData.files)
+    if (files.length > 0) void addFiles(files)
+  }
 
   function refreshIntegrationStatus(): void {
     window.gaia.auth.linear.status().then(setLinearConnected)
     window.gaia.auth.googleTasks.status().then(setGoogleTasksConnected)
+    window.gaia.auth.googleCalendar.status().then(setGoogleCalendarConnected)
   }
 
   useEffect(() => {
     refreshIntegrationStatus()
     window.gaia.hud.badge().then(setHudBadge)
     window.gaia.memory.hasCoreFacts().then((has) => setIsOnboarding(!has))
+    return window.gaia.hud.onState(setHudState)
   }, [])
 
   function pushToasts(labels: string[]): void {
@@ -300,17 +370,35 @@ export default function App(): React.JSX.Element {
     }
   }
 
+  async function handleConnectGoogleCalendar(): Promise<void> {
+    if (googleCalendarConnected) return
+    try {
+      await window.gaia.auth.googleCalendar.connect()
+      setGoogleCalendarConnected(await window.gaia.auth.googleCalendar.status())
+    } catch (err) {
+      pushToasts([`⚠ Google Calendar : ${err instanceof Error ? err.message : 'erreur inconnue'}`])
+    }
+  }
+
   async function handleSubmit(event: React.FormEvent): Promise<void> {
     event.preventDefault()
     const text = input.trim()
-    if (!text || isSending) return
+    if ((!text && pendingAttachments.length === 0) || isSending) return
 
-    setMessages((prev) => [...prev, { role: 'user', text }])
+    const docxTexts = pendingAttachments.filter((item) => item.kind === 'docx')
+    const attachments = pendingAttachments
+      .filter((item): item is PendingItem & { id: number; kind: 'image' | 'pdf' } => item.kind !== 'docx')
+      .map(({ id: _id, name: _name, ...att }) => att)
+    const docxPrefix = docxTexts.map((d) => `[Contenu de ${d.name}]\n${d.text}`).join('\n\n')
+    const finalText = docxPrefix ? `${docxPrefix}\n\n${text}` : text
+
+    setMessages((prev) => [...prev, { role: 'user', text: text || `[${pendingAttachments.length} fichier(s)]` }])
     setInput('')
+    setPendingAttachments([])
     setIsSending(true)
 
     try {
-      const reply = await window.gaia.chat.send(text)
+      const reply = await window.gaia.chat.send(finalText, attachments)
       setMessages((prev) => [
         ...prev,
         { role: 'assistant', text: reply.text, model: reply.model, imageDataUri: reply.imageDataUri }
@@ -323,11 +411,19 @@ export default function App(): React.JSX.Element {
       setMessages((prev) => [...prev, { role: 'assistant', text: `⚠ ${message}` }])
     } finally {
       setIsSending(false)
+      setHudState({ state: 'idle' })
     }
   }
 
   const lastReply = [...messages].reverse().find((m) => m.role === 'assistant')
-  const stateLabel = isSending ? 'réflexion...' : listening ? "à l'écoute..." : 'en veille'
+  const stateLabel =
+    hudState.state === 'thinking'
+      ? (hudState.detail ?? 'réflexion...')
+      : hudState.state === 'responding'
+        ? 'réponse...'
+        : hudState.state === 'listening'
+          ? "à l'écoute..."
+          : 'en veille'
 
   return (
     <>
@@ -387,6 +483,14 @@ export default function App(): React.JSX.Element {
             Google Tasks
             <span className={`status-dot ${googleTasksConnected ? 'on' : ''}`} />
           </div>
+          <button type="button" className="nav-item" onClick={handleConnectGoogleCalendar}>
+            <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.6">
+              <rect x="3" y="4" width="18" height="18" rx="2" />
+              <path d="M16 2v4M8 2v4M3 10h18" />
+            </svg>
+            Google Calendar
+            <span className={`status-dot ${googleCalendarConnected ? 'on' : ''}`} />
+          </button>
 
           <div className="section-label">SYSTÈME</div>
           <button type="button" className="nav-item" onClick={() => setShowProfile(true)}>
@@ -398,9 +502,9 @@ export default function App(): React.JSX.Element {
           </button>
         </div>
 
-        <div className="main">
+        <div className="main" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
           <div className="stage">
-            <NetworkCanvas />
+            <NetworkCanvas hudState={hudState.state} />
             <div className="core-label">
               <div className="name">GAIA</div>
               <div className="state">{stateLabel}</div>
@@ -414,18 +518,35 @@ export default function App(): React.JSX.Element {
             </div>
           )}
 
+          {pendingAttachments.length > 0 && (
+            <div className="attachments">
+              {pendingAttachments.map((att) => (
+                <span key={att.id} className="attachment-chip">
+                  {att.kind === 'image' ? '🖼' : '📄'} {att.name}
+                  <button
+                    type="button"
+                    onClick={() => setPendingAttachments((prev) => prev.filter((a) => a.id !== att.id))}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
           <form className="inputbar" onSubmit={handleSubmit}>
             <input
               type="text"
               value={input}
               onChange={(event) => setInput(event.target.value)}
-              placeholder="Demande quelque chose à Gaia..."
+              onPaste={handlePaste}
+              placeholder="Demande quelque chose à Gaia... (glisse-dépose ou colle une image/PDF)"
               disabled={isSending}
             />
             <button
               type="button"
-              className={`iconbtn mic ${listening ? 'active' : ''}`}
-              onClick={() => setListening((v) => !v)}
+              className={`iconbtn mic ${hudState.state === 'listening' ? 'active' : ''}`}
+              onClick={() => setHudState((prev) => ({ state: prev.state === 'listening' ? 'idle' : 'listening' }))}
             >
               <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.6">
                 <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />

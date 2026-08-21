@@ -25,6 +25,11 @@ npm run typecheck
 - [x] Mémoire continue (core/peripheral) + onboarding + écran profil — voir "Configuration Supabase" ci-dessous
 - [x] Recherche d'images — voir "Configuration recherche d'images" ci-dessous
 - [x] Correctif sidebar — les pastilles Linear/Google Tasks reflètent maintenant l'état de connexion réel (rafraîchi après chaque échange), plus une valeur figée
+- [x] Briefing proactif météo/actu (spec 8.1) — étend le job Haiku du badge HUD existant, Open-Meteo + rss-parser
+- [x] États HUD différenciés (spec 8.2) — un seul flux d'événements `hud:state` pour le label et l'intensité de l'animation
+- [x] Google Calendar (spec 8.3) — `mcp_servers`, OAuth classique + PKCE (pas de DCR côté Google, contrairement à Linear), croisement Calendar/Tasks dans le system prompt
+- [x] Vision (spec 8.4) — glisser-déposer/coller une image, content block natif, vérifié avec de vrais événements paste/drop et un vrai fichier image
+- [x] Lecture PDF/DOCX (spec 8.5) — PDF en content block `document` natif, DOCX extrait côté renderer via `mammoth` et fusionné dans le message texte ; vérifié avec un vrai `.pdf` et un vrai `.docx` (chip + extraction + soumission bout en bout via Playwright)
 
 ## Configuration Google Tasks
 

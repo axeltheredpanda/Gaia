@@ -17,8 +17,10 @@
     "@supabase/supabase-js": "^2.112.3",
     "dotenv": "^17.4.2",
     "google-tasks-mcp": "^0.2.0",
+    "mammoth": "^1.12.1",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "rss-parser": "^3.13.0"
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^2.0.0",
