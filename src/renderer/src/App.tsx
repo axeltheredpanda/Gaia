@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-type Message = { role: 'user' | 'assistant'; text: string }
+type Message = { role: 'user' | 'assistant'; text: string; model?: string }
 
 function Sphere(): React.JSX.Element {
   return (
@@ -62,6 +62,11 @@ function Transcript({ messages }: { messages: Message[] }): React.JSX.Element {
           }
         >
           {message.text}
+          {message.model && (
+            <span className="ml-2 align-middle text-[10px] uppercase tracking-wide text-white/30">
+              {message.model.includes('haiku') ? 'haiku' : 'sonnet'}
+            </span>
+          )}
         </div>
       ))}
     </div>
@@ -84,7 +89,7 @@ export default function App(): React.JSX.Element {
 
     try {
       const reply = await window.gaia.chat.send(text)
-      setMessages((prev) => [...prev, { role: 'assistant', text: reply }])
+      setMessages((prev) => [...prev, { role: 'assistant', text: reply.text, model: reply.model }])
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erreur inconnue'
       setMessages((prev) => [...prev, { role: 'assistant', text: `⚠ ${message}` }])

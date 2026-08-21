@@ -4,7 +4,7 @@ declare global {
   interface Window {
     gaia: {
       chat: {
-        send: (text: string) => Promise<string>
+        send: (text: string) => Promise<{ text: string; model: string }>
       }
       auth: {
         linear: {

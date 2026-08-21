@@ -17,7 +17,7 @@ npm run typecheck
 - [x] Chat texte basique avec l'API Claude (+ `web_search` natif) — nécessite `ANTHROPIC_API_KEY` dans `.env`
 - [x] MCP Linear — bouton "Connecter Linear" (OAuth 2.1 + PKCE + enregistrement dynamique de client) ou `LINEAR_API_KEY` en raccourci de test. Flow OAuth non vérifié en conditions réelles (réseau de développement sans accès à `mcp.linear.app`) — à valider avec un vrai compte Linear.
 - [x] MCP Google Tasks — voir "Configuration Google Tasks" ci-dessous
-- [ ] Routing de modèle Haiku/Sonnet
+- [x] Routing de modèle Haiku/Sonnet — heuristique par mots-clés/longueur (spec 4.5), tag visible sous chaque réponse dans le HUD
 - [ ] Stockage Supabase
 - [ ] Comportement proactif todo
 
