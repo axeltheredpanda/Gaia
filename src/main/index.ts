@@ -14,8 +14,9 @@ function createWindow(): void {
     width: 1000,
     height: 700,
     show: false,
+    frame: false,
     autoHideMenuBar: true,
-    backgroundColor: '#05070a',
+    backgroundColor: '#070b09',
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
       sandbox: false
