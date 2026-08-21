@@ -183,13 +183,41 @@ function Toasts({ toasts }: { toasts: Toast[] }): React.JSX.Element {
 
 type CoreFact = { id: number; category: string | null; content: string }
 
+type IntegrationName = 'linear' | 'googleCalendar'
+
+/** Statut + déconnexion d'une intégration (spec 8.8) — Google Tasks exclu : token géré en dehors de l'app. */
+function IntegrationRow({
+  label,
+  connected,
+  onDisconnect
+}: {
+  label: string
+  connected: boolean
+  onDisconnect: () => void
+}): React.JSX.Element {
+  return (
+    <div className="profile-fact">
+      <span style={{ flex: 1 }}>
+        {label} <span className={`status-dot ${connected ? 'on' : ''}`} />
+      </span>
+      {connected && (
+        <button type="button" onClick={onDisconnect}>
+          Déconnecter
+        </button>
+      )}
+    </div>
+  )
+}
+
 /** Écran profil (paramètres) et onboarding premier lancement — même composant, spec : réutilisation. */
 function ProfileScreen({
   isOnboarding,
-  onClose
+  onClose,
+  onIntegrationsChanged
 }: {
   isOnboarding: boolean
   onClose: () => void
+  onIntegrationsChanged: () => void
 }): React.JSX.Element {
   const [facts, setFacts] = useState<CoreFact[]>([])
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -198,13 +226,59 @@ function ProfileScreen({
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const [linearConnected, setLinearConnected] = useState(false)
+  const [googleTasksConnected, setGoogleTasksConnected] = useState(false)
+  const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false)
+  const [rssFeedsText, setRssFeedsText] = useState('')
+  const [weatherCity, setWeatherCity] = useState('')
+  const [appVersion, setAppVersion] = useState('')
+  const [settingsSaved, setSettingsSaved] = useState(false)
+
   async function refresh(): Promise<void> {
     setFacts(await window.gaia.memory.getCoreFacts())
   }
 
+  async function refreshSettings(): Promise<void> {
+    const [linear, googleTasks, googleCalendar, rssFeeds, city, version] = await Promise.all([
+      window.gaia.auth.linear.status(),
+      window.gaia.auth.googleTasks.status(),
+      window.gaia.auth.googleCalendar.status(),
+      window.gaia.settings.getRssFeeds(),
+      window.gaia.settings.getWeatherCity(),
+      window.gaia.settings.getAppVersion()
+    ])
+    setLinearConnected(linear)
+    setGoogleTasksConnected(googleTasks)
+    setGoogleCalendarConnected(googleCalendar)
+    setRssFeedsText((rssFeeds ?? []).join('\n'))
+    setWeatherCity(city ?? '')
+    setAppVersion(version)
+  }
+
   useEffect(() => {
     refresh()
-  }, [])
+    if (!isOnboarding) refreshSettings()
+  }, [isOnboarding])
+
+  async function handleDisconnect(name: IntegrationName): Promise<void> {
+    if (name === 'linear') await window.gaia.auth.linear.disconnect()
+    if (name === 'googleCalendar') await window.gaia.auth.googleCalendar.disconnect()
+    await refreshSettings()
+    onIntegrationsChanged()
+  }
+
+  async function handleSaveBriefingSettings(): Promise<void> {
+    const feeds = rssFeedsText
+      .split('\n')
+      .map((f) => f.trim())
+      .filter(Boolean)
+    await Promise.all([
+      window.gaia.settings.setRssFeeds(feeds),
+      window.gaia.settings.setWeatherCity(weatherCity.trim() || null)
+    ])
+    setSettingsSaved(true)
+    setTimeout(() => setSettingsSaved(false), 2000)
+  }
 
   async function handleDelete(id: number): Promise<void> {
     await window.gaia.memory.deleteFact(id)
@@ -291,6 +365,42 @@ function ProfileScreen({
           onChange={(e) => setFreeText(e.target.value)}
         />
         {error && <p style={{ color: '#e86a5c' }}>⚠ {error}</p>}
+
+        {!isOnboarding && (
+          <>
+            <h2>INTÉGRATIONS</h2>
+            <IntegrationRow label="Linear" connected={linearConnected} onDisconnect={() => handleDisconnect('linear')} />
+            <div className="profile-fact">
+              <span style={{ flex: 1 }}>
+                Google Tasks <span className={`status-dot ${googleTasksConnected ? 'on' : ''}`} />
+              </span>
+            </div>
+            <IntegrationRow
+              label="Google Calendar"
+              connected={googleCalendarConnected}
+              onDisconnect={() => handleDisconnect('googleCalendar')}
+            />
+
+            <h2>BRIEFING</h2>
+            <label className="category">Flux RSS (un par ligne, vide = par défaut)</label>
+            <textarea
+              className="profile-textarea"
+              placeholder="https://..."
+              value={rssFeedsText}
+              onChange={(e) => setRssFeedsText(e.target.value)}
+            />
+            <label className="category">Ville météo (vide = déduite du profil)</label>
+            <input value={weatherCity} onChange={(e) => setWeatherCity(e.target.value)} placeholder="Paris" />
+            <div className="profile-actions">
+              <button type="button" className="primary" onClick={handleSaveBriefingSettings}>
+                {settingsSaved ? 'Enregistré ✓' : 'Enregistrer le briefing'}
+              </button>
+            </div>
+
+            <h2>À PROPOS</h2>
+            <p>Gaia {appVersion && `v${appVersion}`}</p>
+          </>
+        )}
 
         <div className="profile-actions">
           <button type="button" onClick={onClose}>
@@ -572,6 +682,7 @@ export default function App(): React.JSX.Element {
             setShowProfile(false)
             setIsOnboarding(false)
           }}
+          onIntegrationsChanged={refreshIntegrationStatus}
         />
       )}
     </>

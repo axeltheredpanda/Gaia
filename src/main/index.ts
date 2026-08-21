@@ -8,6 +8,7 @@ import { registerChatIpc } from './ipc/chat'
 import { registerAuthIpc } from './ipc/auth'
 import { registerHudIpc } from './ipc/hud'
 import { registerMemoryIpc } from './ipc/memory'
+import { registerSettingsIpc } from './ipc/settings'
 import { startHudBadgeRefreshLoop } from './claude/hudBadge'
 import { registerHudStateWindow } from './hud/hudState'
 
@@ -48,6 +49,7 @@ app.whenReady().then(() => {
   registerAuthIpc()
   registerHudIpc()
   registerMemoryIpc()
+  registerSettingsIpc()
   startHudBadgeRefreshLoop()
   createWindow()
 

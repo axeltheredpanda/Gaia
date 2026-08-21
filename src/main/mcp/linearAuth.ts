@@ -128,7 +128,7 @@ export async function getLinearAuthorizationToken(): Promise<string | null> {
   try {
     const stored = await getSecret(VAULT_SECRET_NAME)
     if (stored) cachedAccessToken = stored
-    return stored
+    return stored || null
   } catch (error) {
     console.error('Lecture du token Linear depuis Supabase Vault échouée', error)
     return null

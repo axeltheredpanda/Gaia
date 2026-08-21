@@ -44,5 +44,12 @@ contextBridge.exposeInMainWorld('gaia', {
       ipcRenderer.invoke('memory:upsertCoreFact', fact),
     deleteFact: (id: number): Promise<void> => ipcRenderer.invoke('memory:deleteFact', id),
     parseFreeText: (text: string): Promise<void> => ipcRenderer.invoke('memory:parseFreeText', text)
+  },
+  settings: {
+    getRssFeeds: (): Promise<string[] | null> => ipcRenderer.invoke('settings:getRssFeeds'),
+    setRssFeeds: (feeds: string[]): Promise<void> => ipcRenderer.invoke('settings:setRssFeeds', feeds),
+    getWeatherCity: (): Promise<string | null> => ipcRenderer.invoke('settings:getWeatherCity'),
+    setWeatherCity: (city: string | null): Promise<void> => ipcRenderer.invoke('settings:setWeatherCity', city),
+    getAppVersion: (): Promise<string> => ipcRenderer.invoke('settings:getAppVersion')
   }
 })

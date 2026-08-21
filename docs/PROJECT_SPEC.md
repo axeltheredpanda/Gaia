@@ -156,8 +156,10 @@ Nouveau tool client `capture_screenshot` (`src/main/tools/screenshot.ts`), ajout
 
 ### 8.8 Écran paramètres complet
 
-À venir.
+Extension du même `ProfileScreen` déjà utilisé pour l'onboarding et l'édition des faits `core` (spec : réutilisation plutôt qu'un nouvel écran), sections supplémentaires affichées uniquement hors onboarding :
 
-### 8.8 Écran paramètres complet
+- **Intégrations** : statut réel de Linear / Google Tasks / Google Calendar (mêmes pastilles que la sidebar) + bouton déconnecter pour Linear et Google Calendar (pas Google Tasks, dont le token est géré en dehors de l'app via `npx google-tasks-mcp auth`). Une déconnexion rafraîchit aussi immédiatement la sidebar (callback partagé, pas de polling).
+- **Briefing** : flux RSS (un par ligne) et ville météo, lus/écrits via `app_settings` (nouvel IPC `settings:*`, `src/main/ipc/settings.ts`).
+- **À propos** : version de l'app (`app.getVersion()`).
 
-À venir.
+**Bug corrigé en marge (re-vérification demandée)** : `disconnectLinear()` écrit une chaîne vide dans Supabase Vault, mais `getLinearAuthorizationToken()` renvoyait cette chaîne vide telle quelle (`return stored`) au lieu de `null` — `isLinearConnected()` (qui teste `!== null`) considérait donc à tort la déconnexion comme toujours connectée. La pastille sidebar elle-même était déjà correctement câblée (vérifié en vidant/repeuplant Vault) ; le bug ne se manifestait qu'après un clic sur Déconnecter. Corrigé à la racine (`stored || null`), pas dans l'appelant. Google Calendar n'était pas affecté (`loadTokenBundle` testait déjà `!stored` correctement).

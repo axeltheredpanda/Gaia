@@ -39,6 +39,13 @@ declare global {
         deleteFact: (id: number) => Promise<void>
         parseFreeText: (text: string) => Promise<void>
       }
+      settings: {
+        getRssFeeds: () => Promise<string[] | null>
+        setRssFeeds: (feeds: string[]) => Promise<void>
+        getWeatherCity: () => Promise<string | null>
+        setWeatherCity: (city: string | null) => Promise<void>
+        getAppVersion: () => Promise<string>
+      }
     }
   }
 }
