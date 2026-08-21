@@ -6,6 +6,8 @@ import { join } from 'node:path'
 import { is } from '@electron-toolkit/utils'
 import { registerChatIpc } from './ipc/chat'
 import { registerAuthIpc } from './ipc/auth'
+import { registerHudIpc } from './ipc/hud'
+import { startHudBadgeRefreshLoop } from './claude/hudBadge'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -39,6 +41,8 @@ function createWindow(): void {
 app.whenReady().then(() => {
   registerChatIpc()
   registerAuthIpc()
+  registerHudIpc()
+  startHudBadgeRefreshLoop()
   createWindow()
 
   app.on('activate', () => {

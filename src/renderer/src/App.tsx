@@ -15,9 +15,11 @@ function Sidebar(): React.JSX.Element {
   const [linearConnected, setLinearConnected] = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [hudBadge, setHudBadge] = useState<string | null>(null)
 
   useEffect(() => {
     window.gaia.auth.linear.status().then(setLinearConnected)
+    window.gaia.hud.badge().then(setHudBadge)
   }, [])
 
   async function handleConnectLinear(): Promise<void> {
@@ -36,6 +38,11 @@ function Sidebar(): React.JSX.Element {
   return (
     <aside className="flex w-56 flex-col gap-3 border-r border-white/5 p-4 text-sm text-white/50">
       <span className="text-xs uppercase tracking-widest text-cyan-400/70">Gaia</span>
+      {hudBadge && (
+        <span className="rounded-lg border border-cyan-400/20 bg-cyan-400/5 px-3 py-2 text-xs text-cyan-100/80">
+          {hudBadge}
+        </span>
+      )}
       <button
         type="button"
         onClick={handleConnectLinear}

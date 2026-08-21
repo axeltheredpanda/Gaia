@@ -1,13 +1,9 @@
 import type Anthropic from '@anthropic-ai/sdk'
-import { getClaudeClient } from './client'
 import { SYSTEM_PROMPT } from './systemPrompt'
-import { getLinearMcpServer } from '../mcp/linear'
-import { getGoogleTasksTools, callGoogleTasksTool } from '../mcp/googleTasksClient'
 import { routeModel } from './router'
-
-const history: Anthropic.Beta.BetaMessageParam[] = []
-
-const MAX_TOOL_ITERATIONS = 5
+import { runToolLoop } from './toolLoop'
+import { appendMessage, loadRecentHistory, getConversationSummary, maybeSummarize } from '../supabase/history'
+import { getMemoryFactsBlock } from '../supabase/memory'
 
 export interface ChatReply {
   text: string
@@ -15,45 +11,29 @@ export interface ChatReply {
 }
 
 export async function sendChat(userText: string): Promise<ChatReply> {
-  const client = getClaudeClient()
-  history.push({ role: 'user', content: userText })
-
-  const mcpServers = [getLinearMcpServer()].filter((server) => server !== null)
-  const googleTasksTools = await getGoogleTasksTools().catch(() => [])
   const model = routeModel(userText)
+  const history = await loadRecentHistory()
+  const [summary, memoryBlock] = await Promise.all([getConversationSummary(), getMemoryFactsBlock()])
 
-  for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-    const response = await client.beta.messages.create({
-      model,
-      max_tokens: 1024,
-      betas: ['mcp-client-2025-11-20'],
-      system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-      tools: [{ type: 'web_search_20250305', name: 'web_search' }, ...googleTasksTools],
-      mcp_servers: mcpServers,
-      messages: history
-    })
+  const system: Anthropic.Beta.BetaTextBlockParam[] = [
+    { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }
+  ]
+  if (memoryBlock) system.push({ type: 'text', text: `Faits durables sur Axel :\n${memoryBlock}` })
+  if (summary) system.push({ type: 'text', text: `Résumé de la conversation précédente :\n${summary}` })
 
-    history.push({ role: 'assistant', content: response.content })
+  const userMessage: Anthropic.Beta.BetaMessageParam = { role: 'user', content: userText }
+  const { text, messages } = await runToolLoop([...history, userMessage], {
+    model,
+    maxTokens: 1024,
+    system,
+    includeWebSearch: true
+  })
 
-    const toolUseBlocks = response.content.filter(
-      (block): block is Anthropic.Beta.BetaToolUseBlock => block.type === 'tool_use'
-    )
-
-    if (toolUseBlocks.length === 0) {
-      const text = response.content
-        .filter((block) => block.type === 'text')
-        .map((block) => block.text)
-        .join('\n')
-      return { text, model }
-    }
-
-    const toolResults: Anthropic.Beta.BetaToolResultBlockParam[] = []
-    for (const toolUse of toolUseBlocks) {
-      const text = await callGoogleTasksTool(toolUse.name, toolUse.input as Record<string, unknown>)
-      toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: text })
-    }
-    history.push({ role: 'user', content: toolResults })
+  const newMessages = messages.slice(history.length)
+  for (const message of newMessages) {
+    await appendMessage(message.role as 'user' | 'assistant', message.content)
   }
+  await maybeSummarize().catch((error: unknown) => console.error('Résumé de conversation échoué', error))
 
-  return { text: "Désolé, je n'ai pas réussi à terminer cette demande (trop d'étapes).", model }
+  return { text, model }
 }

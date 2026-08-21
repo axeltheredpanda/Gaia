@@ -12,6 +12,9 @@ declare global {
           status: () => Promise<boolean>
         }
       }
+      hud: {
+        badge: () => Promise<string | null>
+      }
     }
   }
 }

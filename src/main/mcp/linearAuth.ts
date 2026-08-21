@@ -1,11 +1,13 @@
 import { generateCodeChallenge, generateRandomToken } from '../auth/pkce'
 import { openAuthPopup } from '../auth/popupWindow'
 import { waitForOAuthCallback } from '../auth/localCallbackServer'
+import { getSecret, setSecret } from '../supabase/vault'
 
 export const LINEAR_MCP_URL = 'https://mcp.linear.app/mcp'
 
 const REDIRECT_PORT = 53682
 const REDIRECT_URI = `http://127.0.0.1:${REDIRECT_PORT}/callback`
+const VAULT_SECRET_NAME = 'linear_access_token'
 
 let cachedAccessToken: string | null = null
 
@@ -105,6 +107,14 @@ export async function connectLinear(): Promise<void> {
   }
   const tokens = (await tokenRes.json()) as { access_token: string }
   cachedAccessToken = tokens.access_token
+
+  try {
+    await setSecret(VAULT_SECRET_NAME, tokens.access_token)
+  } catch (error) {
+    // le token reste utilisable pour cette session ; seule la persistance entre
+    // relances de l'app est perdue si Supabase Vault est indisponible
+    console.error('Stockage du token Linear dans Supabase Vault échoué', error)
+  }
 }
 
 /**
@@ -112,10 +122,19 @@ export async function connectLinear(): Promise<void> {
  * l'intégration sans passer par le flow OAuth popup — le serveur MCP Linear
  * accepte les deux comme Bearer token.
  */
-export function getLinearAuthorizationToken(): string | null {
-  return process.env.LINEAR_API_KEY ?? cachedAccessToken
+export async function getLinearAuthorizationToken(): Promise<string | null> {
+  if (process.env.LINEAR_API_KEY) return process.env.LINEAR_API_KEY
+  if (cachedAccessToken) return cachedAccessToken
+  try {
+    const stored = await getSecret(VAULT_SECRET_NAME)
+    if (stored) cachedAccessToken = stored
+    return stored
+  } catch (error) {
+    console.error('Lecture du token Linear depuis Supabase Vault échouée', error)
+    return null
+  }
 }
 
-export function isLinearConnected(): boolean {
-  return getLinearAuthorizationToken() !== null
+export async function isLinearConnected(): Promise<boolean> {
+  return (await getLinearAuthorizationToken()) !== null
 }

@@ -10,5 +10,8 @@ contextBridge.exposeInMainWorld('gaia', {
       connect: (): Promise<void> => ipcRenderer.invoke('auth:linear:connect'),
       status: (): Promise<boolean> => ipcRenderer.invoke('auth:linear:status')
     }
+  },
+  hud: {
+    badge: (): Promise<string | null> => ipcRenderer.invoke('hud:badge')
   }
 })
