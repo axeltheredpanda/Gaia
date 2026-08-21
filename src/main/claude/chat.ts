@@ -1,5 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { SYSTEM_PROMPT } from './systemPrompt'
+import { getCurrentDateTimeLine } from './datetime'
 import { routeModel } from './router'
 import { runToolLoop } from './toolLoop'
 import { appendMessage, loadRecentHistory, getConversationSummary, maybeSummarize } from '../supabase/history'
@@ -17,7 +18,9 @@ export async function sendChat(userText: string): Promise<ChatReply> {
   const [summary, memoryBlock] = await Promise.all([getConversationSummary(), getMemoryFactsBlock()])
 
   const system: Anthropic.Beta.BetaTextBlockParam[] = [
-    { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }
+    { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+    // jamais cache_control ici : doit être fraîche à chaque requête
+    { type: 'text', text: getCurrentDateTimeLine() }
   ]
   if (memoryBlock) system.push({ type: 'text', text: `Faits durables sur Axel :\n${memoryBlock}` })
   if (summary) system.push({ type: 'text', text: `Résumé de la conversation précédente :\n${summary}` })

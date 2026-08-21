@@ -1,5 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { runToolLoop } from './toolLoop'
+import { getCurrentDateTimeLine } from './datetime'
 import { setHudBadge } from '../supabase/hudCache'
 import { isSupabaseConfigured } from '../supabase/client'
 
@@ -14,6 +15,8 @@ async function refreshHudBadgeOnce(): Promise<void> {
     const { text } = await runToolLoop(messages, {
       model: 'claude-haiku-4-5-20251001',
       maxTokens: 200,
+      // recalculée à chaque appel de cette fonction (déjà fraîche : jamais mémorisée)
+      system: [{ type: 'text', text: getCurrentDateTimeLine() }],
       includeWebSearch: false
     })
     if (text.trim()) await setHudBadge(text.trim())
