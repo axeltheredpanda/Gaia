@@ -2,13 +2,18 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('gaia', {
   chat: {
-    send: (text: string): Promise<{ text: string; model: string; taskActions: string[] }> =>
+    send: (
+      text: string
+    ): Promise<{ text: string; model: string; taskActions: string[]; imageDataUri: string | null }> =>
       ipcRenderer.invoke('chat:send', text)
   },
   auth: {
     linear: {
       connect: (): Promise<void> => ipcRenderer.invoke('auth:linear:connect'),
       status: (): Promise<boolean> => ipcRenderer.invoke('auth:linear:status')
+    },
+    googleTasks: {
+      status: (): Promise<boolean> => ipcRenderer.invoke('auth:googleTasks:status')
     }
   },
   hud: {

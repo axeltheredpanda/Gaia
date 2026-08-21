@@ -1,4 +1,7 @@
 import { createRequire } from 'node:module'
+import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type Anthropic from '@anthropic-ai/sdk'
@@ -49,4 +52,15 @@ export async function callGoogleTasksTool(name: string, input: Record<string, un
     .filter((block) => block.type === 'text')
     .map((block) => block.text)
     .join('\n')
+}
+
+/**
+ * Le sous-processus démarre et liste ses outils qu'il y ait ou non des
+ * credentials (vérifié en test) : le seul signal fiable de connexion réelle
+ * est la présence du token OAuth écrit par `npx google-tasks-mcp auth`.
+ */
+export function isGoogleTasksConnected(): boolean {
+  const dir = process.env.GTASKS_MCP_DIR ?? join(homedir(), '.config', 'google-tasks-mcp')
+  const tokenPath = process.env.GTASKS_MCP_TOKEN ?? join(dir, 'token.json')
+  return existsSync(tokenPath)
 }

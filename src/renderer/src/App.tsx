@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-type Message = { role: 'user' | 'assistant'; text: string; model?: string }
+type Message = { role: 'user' | 'assistant'; text: string; model?: string; imageDataUri?: string | null }
 type Toast = { id: number; text: string }
 let nextToastId = 0
 
@@ -265,13 +265,19 @@ export default function App(): React.JSX.Element {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [listening, setListening] = useState(false)
   const [linearConnected, setLinearConnected] = useState(false)
+  const [googleTasksConnected, setGoogleTasksConnected] = useState(false)
   const [hudBadge, setHudBadge] = useState<string | null>(null)
   const [activeModel, setActiveModel] = useState<string | null>(null)
   const [showProfile, setShowProfile] = useState(false)
   const [isOnboarding, setIsOnboarding] = useState(false)
 
-  useEffect(() => {
+  function refreshIntegrationStatus(): void {
     window.gaia.auth.linear.status().then(setLinearConnected)
+    window.gaia.auth.googleTasks.status().then(setGoogleTasksConnected)
+  }
+
+  useEffect(() => {
+    refreshIntegrationStatus()
     window.gaia.hud.badge().then(setHudBadge)
     window.gaia.memory.hasCoreFacts().then((has) => setIsOnboarding(!has))
   }, [])
@@ -305,9 +311,13 @@ export default function App(): React.JSX.Element {
 
     try {
       const reply = await window.gaia.chat.send(text)
-      setMessages((prev) => [...prev, { role: 'assistant', text: reply.text, model: reply.model }])
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', text: reply.text, model: reply.model, imageDataUri: reply.imageDataUri }
+      ])
       setActiveModel(reply.model)
       pushToasts(reply.taskActions)
+      refreshIntegrationStatus()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erreur inconnue'
       setMessages((prev) => [...prev, { role: 'assistant', text: `⚠ ${message}` }])
@@ -375,7 +385,7 @@ export default function App(): React.JSX.Element {
               <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h11" />
             </svg>
             Google Tasks
-            <span className="status-dot on" />
+            <span className={`status-dot ${googleTasksConnected ? 'on' : ''}`} />
           </div>
 
           <div className="section-label">SYSTÈME</div>
@@ -397,7 +407,12 @@ export default function App(): React.JSX.Element {
             </div>
           </div>
 
-          {lastReply && <div className="last-reply">{lastReply.text}</div>}
+          {lastReply && (
+            <div className="last-reply">
+              {lastReply.text}
+              {lastReply.imageDataUri && <img src={lastReply.imageDataUri} alt="" className="reply-image" />}
+            </div>
+          )}
 
           <form className="inputbar" onSubmit={handleSubmit}>
             <input

@@ -11,6 +11,7 @@ export interface ChatReply {
   text: string
   model: string
   taskActions: string[]
+  imageDataUri: string | null
 }
 
 export async function sendChat(userText: string): Promise<ChatReply> {
@@ -34,11 +35,12 @@ export async function sendChat(userText: string): Promise<ChatReply> {
   if (summary) system.push({ type: 'text', text: `Résumé de la conversation précédente :\n${summary}` })
 
   const userMessage: Anthropic.Beta.BetaMessageParam = { role: 'user', content: userText }
-  const { text, messages, taskActions } = await runToolLoop([...history, userMessage], {
+  const { text, messages, taskActions, imageDataUri } = await runToolLoop([...history, userMessage], {
     model,
     maxTokens: 1024,
     system,
-    includeWebSearch: true
+    includeWebSearch: true,
+    includeImageSearch: true
   })
 
   const newMessages = messages.slice(history.length)
@@ -50,5 +52,5 @@ export async function sendChat(userText: string): Promise<ChatReply> {
     console.error('Extraction mémoire échouée', error)
   )
 
-  return { text, model, taskActions }
+  return { text, model, taskActions, imageDataUri }
 }

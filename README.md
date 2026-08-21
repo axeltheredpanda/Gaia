@@ -23,6 +23,8 @@ npm run typecheck
 - [x] Comportement proactif todo — ajout silencieux (system prompt explicite, spec 4.3) + toast HUD discret sur les créations détectées (Google Tasks et Linear)
 - [x] Correctif ancrage temporel — date/heure fraîches à chaque requête, hors bloc caché (chat + badge HUD)
 - [x] Mémoire continue (core/peripheral) + onboarding + écran profil — voir "Configuration Supabase" ci-dessous
+- [x] Recherche d'images — voir "Configuration recherche d'images" ci-dessous
+- [x] Correctif sidebar — les pastilles Linear/Google Tasks reflètent maintenant l'état de connexion réel (rafraîchi après chaque échange), plus une valeur figée
 
 ## Configuration Google Tasks
 
@@ -111,3 +113,29 @@ test reproduisant fidèlement les signatures officielles (`vault.create_secret`,
 code source de `supabase/vault`. De même, les appels Haiku réels (extraction
 et parsing du profil) sont non vérifiés faute de clé Anthropic disponible ici
 — seule leur intégration (IPC, erreurs, structure de la requête tool-use) l'est.
+
+## Configuration recherche d'images
+
+Optionnel (spec 4.4) — sans `GOOGLE_CSE_API_KEY`/`GOOGLE_CSE_ID`, le tool
+`search_image` retombe automatiquement sur Openverse (gratuit, sans clé,
+résultats moins précis). Pour Google : créer un moteur de recherche
+personnalisé en mode "Image search" sur
+[programmablesearchengine.google.com](https://programmablesearchengine.google.com),
+récupérer sa clé API et son `cx`.
+
+Architecture (voir spec 4.4 pour le détail des déviations par rapport au texte
+initial) : le tool s'exécute côté client dans la même boucle d'outils que
+Google Tasks (`src/main/claude/toolLoop.ts`) ; le main process télécharge
+l'image lui-même et la sert au renderer en **data URI** — jamais d'URL tierce
+chargée côté renderer, la CSP n'autorise que `img-src 'self' data:`. Le
+résultat texte renvoyé au modèle ne contient qu'une description courte,
+jamais les octets de l'image (pas la peine de gonfler le contexte).
+
+Vérifié directement : les trois branches (Google prioritaire, fallback
+Openverse, aucun résultat, type de contenu invalide, image trop volumineuse
+rejetée à 8 Mo) testées avec un `fetch` simulé — chacune retombe proprement
+sur un texte de repli au lieu de planter. Non vérifié : les vrais appels
+réseau vers Google/Openverse (bloqués par le sandbox réseau de ce
+container, même limitation que pour `mcp.linear.app` plus haut) et le rendu
+réel d'une image dans le HUD (nécessite une clé Anthropic pour déclencher le
+tool en conditions réelles).

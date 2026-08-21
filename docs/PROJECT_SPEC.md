@@ -42,11 +42,17 @@ Ce comportement doit être explicité dans le system prompt : par défaut un mod
 
 ### 4.4 Recherche d'images
 
-Tool custom, pas de MCP nécessaire :
+Tool custom (`search_image`), pas de MCP nécessaire :
 
-- **Primaire** : Google Custom Search API, mode image (100 requêtes gratuites/jour, payant au-delà, SDK officiel Node `googleapis`)
+- **Primaire** : Google Custom Search API, mode image (100 requêtes gratuites/jour, payant au-delà)
 - **Fallback gratuit** : Openverse (gratuit, sans clé pour usage basique, catalogue sous licences ouvertes)
 - Bing Image Search exclu : l'API a été retirée par Microsoft en août 2025.
+- Un seul résultat (le meilleur) par recherche, pas une liste — le HUD affiche une image, pas une galerie.
+
+**Déviations par rapport au texte initial de la spec** :
+- Le SDK `googleapis` n'est pas utilisé : la recherche d'images est un seul appel REST (`customsearch.googleapis.com`), `fetch` natif suffit très largement, `googleapis` aurait ajouté une grosse dépendance pour un seul endpoint.
+- L'image ne transite jamais par une URL publique côté renderer : le point sensible est que les résultats (Google comme Openverse) pointent vers des domaines tiers arbitraires (le site source de chaque image), impossibles à allowlister proprement dans la CSP. Le main process télécharge donc l'image lui-même et la sert en **data URI** au renderer (pas de petit serveur de proxy local — inutile pour des images ponctuelles de quelques centaines de Ko à quelques Mo, plafonné à 8 Mo). La CSP du renderer n'autorise que `img-src 'self' data:`, jamais d'origine tierce.
+- Le tool s'exécute côté client comme Google Tasks (boucle d'appel d'outils, `src/main/claude/toolLoop.ts`), pas via `mcp_servers` — ce n'est de toute façon pas un serveur MCP.
 
 ### 4.5 Routing de modèle (gestion budget/token)
 
