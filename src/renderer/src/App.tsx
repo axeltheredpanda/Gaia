@@ -80,10 +80,37 @@ function Transcript({ messages }: { messages: Message[] }): React.JSX.Element {
   )
 }
 
+type Toast = { id: number; text: string }
+let nextToastId = 0
+
+function Toasts({ toasts }: { toasts: Toast[] }): React.JSX.Element {
+  return (
+    <div className="pointer-events-none fixed bottom-20 right-4 flex flex-col gap-2">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className="rounded-lg border border-cyan-400/30 bg-[#0a0f14] px-4 py-2 text-sm text-cyan-100 shadow-lg"
+        >
+          ✓ Ajouté : {toast.text}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function App(): React.JSX.Element {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isSending, setIsSending] = useState(false)
+  const [toasts, setToasts] = useState<Toast[]>([])
+
+  function pushToasts(labels: string[]): void {
+    const newToasts = labels.map((text) => ({ id: nextToastId++, text }))
+    setToasts((prev) => [...prev, ...newToasts])
+    for (const toast of newToasts) {
+      setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== toast.id)), 4000)
+    }
+  }
 
   async function handleSubmit(event: React.FormEvent): Promise<void> {
     event.preventDefault()
@@ -97,6 +124,7 @@ export default function App(): React.JSX.Element {
     try {
       const reply = await window.gaia.chat.send(text)
       setMessages((prev) => [...prev, { role: 'assistant', text: reply.text, model: reply.model }])
+      pushToasts(reply.taskActions)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erreur inconnue'
       setMessages((prev) => [...prev, { role: 'assistant', text: `⚠ ${message}` }])
@@ -124,6 +152,7 @@ export default function App(): React.JSX.Element {
           />
         </form>
       </div>
+      <Toasts toasts={toasts} />
     </div>
   )
 }

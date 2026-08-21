@@ -19,7 +19,7 @@ npm run typecheck
 - [x] MCP Google Tasks — voir "Configuration Google Tasks" ci-dessous
 - [x] Routing de modèle Haiku/Sonnet — heuristique par mots-clés/longueur (spec 4.5), tag visible sous chaque réponse dans le HUD
 - [x] Stockage Supabase — voir "Configuration Supabase" ci-dessous
-- [ ] Comportement proactif todo
+- [x] Comportement proactif todo — ajout silencieux (system prompt explicite, spec 4.3) + toast HUD discret sur les créations détectées (Google Tasks et Linear)
 
 ## Configuration Google Tasks
 

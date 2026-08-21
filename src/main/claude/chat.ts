@@ -8,6 +8,7 @@ import { getMemoryFactsBlock } from '../supabase/memory'
 export interface ChatReply {
   text: string
   model: string
+  taskActions: string[]
 }
 
 export async function sendChat(userText: string): Promise<ChatReply> {
@@ -22,7 +23,7 @@ export async function sendChat(userText: string): Promise<ChatReply> {
   if (summary) system.push({ type: 'text', text: `Résumé de la conversation précédente :\n${summary}` })
 
   const userMessage: Anthropic.Beta.BetaMessageParam = { role: 'user', content: userText }
-  const { text, messages } = await runToolLoop([...history, userMessage], {
+  const { text, messages, taskActions } = await runToolLoop([...history, userMessage], {
     model,
     maxTokens: 1024,
     system,
@@ -35,5 +36,5 @@ export async function sendChat(userText: string): Promise<ChatReply> {
   }
   await maybeSummarize().catch((error: unknown) => console.error('Résumé de conversation échoué', error))
 
-  return { text, model }
+  return { text, model, taskActions }
 }
