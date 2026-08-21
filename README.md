@@ -14,7 +14,7 @@ npm run typecheck
 ## État d'avancement
 
 - [x] Squelette Electron + React + Tailwind, HUD placeholder (sphère, sidebar, barre de saisie)
-- [ ] Chat texte basique avec l'API Claude
+- [x] Chat texte basique avec l'API Claude (+ `web_search` natif) — nécessite `ANTHROPIC_API_KEY` dans `.env`
 - [ ] MCP Linear
 - [ ] MCP Google Tasks
 - [ ] Routing de modèle Haiku/Sonnet
