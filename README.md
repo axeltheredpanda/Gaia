@@ -38,6 +38,7 @@ npm run typecheck
 - [x] Sources RSS fixées explicitement (spec 8.1/8.9) — Le Monde / Les Echos finance-marchés / TechCrunch, plus de choix ouvert après un article hors-sujet remonté en test. URLs non vérifiables dans ce sandbox (réseau bloqué, même limitation que les autres domaines externes) — appliquées telles que fournies.
 - [x] Maîtrise des coûts (spec 8.10) — log de coût par appel API dans Supabase (`api_usage_log`) avec coût du jour affiché dans les paramètres, routing Haiku/Sonnet vérifié en pratique sur 40 messages représentatifs (73 % Haiku), cache TTL étendu à 1h sur le bloc système du chat. Non vérifié : impact chiffré réel sur la facture (pas de clé Anthropic disponible ici).
 - [x] Appels API strictement à la demande (spec 8.11) — suite au retour "enlève les appels silencieux" : job de badge HUD en tâche de fond, extraction mémoire automatique après chaque échange et résumé de conversation automatique **supprimés entièrement** (pas juste limités) — `hudBadge.ts` et `memoryExtraction.ts` supprimés, `maybeSummarize()`/`upsertPeripheralFact()` retirés. Il ne reste que 2 points d'appel Claude dans tout le code, tous deux déclenchés par une action explicite d'Axel (envoi d'un message, sauvegarde du profil) — vérifié par relecture exhaustive des call sites (`grep` sur `messages.create`).
+- [x] V2 vocal — voir "Configuration V2 vocal" ci-dessous et spec 9 pour le détail complet (architecture, déviations, ce qui est vérifié ou non). Push-to-talk (bouton micro + raccourci global configurable), ASR whisper.cpp local (`nodejs-whisper`), TTS Piper local (`piper-tts[http]`) avec synthèse phrase par phrase en streaming, états HUD réutilisés sans rien ajouter côté visuel. Le texte transcrit traverse le pipeline de chat existant sans branche spéciale — le passage au streaming Claude (nécessaire pour la latence TTS) bénéficie aussi à l'affichage du texte tapé.
 
 ## Configuration Google Tasks
 
@@ -152,3 +153,37 @@ réseau vers Google/Openverse (bloqués par le sandbox réseau de ce
 container, même limitation que pour `mcp.linear.app` plus haut) et le rendu
 réel d'une image dans le HUD (nécessite une clé Anthropic pour déclencher le
 tool en conditions réelles).
+
+## Configuration V2 vocal
+
+Optionnel — sans configuration, l'app fonctionne en mode texte exactement comme avant (aucune régression). Voir spec 9 pour l'architecture complète et les déviations.
+
+**Prérequis externes** (non installés par `npm install`, comme `ffmpeg`/whisper.cpp/Piper sont des outils natifs) :
+
+```bash
+# ASR (whisper.cpp, compilé localement au premier besoin — nécessite un toolchain C++)
+# macOS : xcode-select --install
+# Linux : sudo apt install build-essential ffmpeg
+
+# TTS (Piper, distribution Python multiplateforme)
+pip install "piper-tts[http]"
+python3 -m piper.download_voices   # liste les voix disponibles
+python3 -m piper.download_voices fr_FR-siwis-medium   # exemple, à confirmer/choisir soi-même
+```
+
+Puis dans Gaia, Paramètres → VOIX : choisir le raccourci push-to-talk global (F1-F12, redémarrage de
+l'app requis après changement) et saisir le nom de la voix Piper téléchargée. Sans nom de voix
+configuré, Gaia continue de répondre en texte, simplement sans lecture à voix haute.
+
+**Permission macOS requise pour le raccourci global** (comme pour la capture d'écran) : Réglages
+système → Confidentialité et sécurité → Surveillance des saisies (Input Monitoring) → autoriser
+Gaia. Sans elle, `uiohook-napi` ne reçoit silencieusement aucun événement clavier — le bouton micro
+du HUD reste utilisable normalement (ne nécessite pas cette permission, DOM natif).
+
+Vérifié dans ce sandbox de développement (sans accès réseau à Hugging Face/GitHub releases, sans
+device audio) : compilation réelle de whisper.cpp, pipeline complet micro→transcription via
+Playwright avec device audio simulé, push-to-talk (bouton et raccourci global), découpage en
+phrases du flux streamé, installation réelle de `piper-tts` et comportement de son serveur HTTP,
+file de lecture audio et transitions d'état HUD. Non vérifié : téléchargement réel d'un modèle
+whisper.cpp/voix Piper (donc précision/qualité réelles), lecture audio de bout en bout (pas de
+device audio dans ce sandbox), déclenchement par une vraie frappe clavier OS.

@@ -9,7 +9,9 @@ import { registerAuthIpc } from './ipc/auth'
 import { registerHudIpc } from './ipc/hud'
 import { registerMemoryIpc } from './ipc/memory'
 import { registerSettingsIpc } from './ipc/settings'
+import { registerVoiceIpc } from './ipc/voice'
 import { registerHudStateWindow } from './hud/hudState'
+import { startPushToTalkListener } from './voice/ptt'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -30,6 +32,7 @@ function createWindow(): void {
   })
 
   registerHudStateWindow(mainWindow)
+  void startPushToTalkListener(mainWindow)
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
@@ -58,6 +61,7 @@ app.whenReady().then(() => {
   registerHudIpc()
   registerMemoryIpc()
   registerSettingsIpc()
+  registerVoiceIpc()
   createWindow()
 
   app.on('activate', () => {

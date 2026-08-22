@@ -15,7 +15,11 @@ export interface ChatReply {
   imageDataUri: string | null
 }
 
-export async function sendChat(userText: string, attachments?: Attachment[]): Promise<ChatReply> {
+export async function sendChat(
+  userText: string,
+  attachments?: Attachment[],
+  onTextDelta?: (delta: string) => void
+): Promise<ChatReply> {
   const model = routeModel(userText)
   const history = await loadRecentHistory()
   const [summary, coreBlock, peripheralBlock] = await Promise.all([
@@ -55,7 +59,8 @@ export async function sendChat(userText: string, attachments?: Attachment[]): Pr
     includeImageSearch: true,
     includeBriefingTools: true,
     includeScreenshotTool: true,
-    emitHudEvents: true
+    emitHudEvents: true,
+    onTextDelta
   })
 
   const newMessages = messages.slice(history.length)

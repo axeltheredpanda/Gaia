@@ -3,6 +3,8 @@ import { getSupabaseClient, isSupabaseConfigured } from './client'
 interface AppSettingsRow {
   rss_feeds: string[] | null
   weather_city_override: string | null
+  ptt_shortcut_key: string | null
+  piper_voice_name: string | null
 }
 
 async function getRow(): Promise<AppSettingsRow | null> {
@@ -10,7 +12,7 @@ async function getRow(): Promise<AppSettingsRow | null> {
   const supabase = getSupabaseClient()
   const { data, error } = await supabase
     .from('app_settings')
-    .select('rss_feeds, weather_city_override')
+    .select('rss_feeds, weather_city_override, ptt_shortcut_key, piper_voice_name')
     .eq('id', 'default')
     .maybeSingle()
   if (error) throw new Error(error.message)
@@ -42,5 +44,33 @@ export async function setWeatherCityOverride(city: string | null): Promise<void>
   const { error } = await supabase
     .from('app_settings')
     .upsert({ id: 'default', weather_city_override: city, updated_at: new Date().toISOString() })
+  if (error) throw new Error(error.message)
+}
+
+export async function getPttShortcutKey(): Promise<string | null> {
+  const row = await getRow()
+  return row?.ptt_shortcut_key ?? null
+}
+
+export async function setPttShortcutKey(key: string): Promise<void> {
+  if (!isSupabaseConfigured()) return
+  const supabase = getSupabaseClient()
+  const { error } = await supabase
+    .from('app_settings')
+    .upsert({ id: 'default', ptt_shortcut_key: key, updated_at: new Date().toISOString() })
+  if (error) throw new Error(error.message)
+}
+
+export async function getPiperVoiceName(): Promise<string | null> {
+  const row = await getRow()
+  return row?.piper_voice_name ?? null
+}
+
+export async function setPiperVoiceName(name: string): Promise<void> {
+  if (!isSupabaseConfigured()) return
+  const supabase = getSupabaseClient()
+  const { error } = await supabase
+    .from('app_settings')
+    .upsert({ id: 'default', piper_voice_name: name, updated_at: new Date().toISOString() })
   if (error) throw new Error(error.message)
 }

@@ -10,8 +10,11 @@ declare global {
       chat: {
         send: (
           text: string,
-          attachments?: Attachment[]
+          attachments?: Attachment[],
+          isVoice?: boolean
         ) => Promise<{ text: string; model: string; taskActions: string[]; imageDataUri: string | null }>
+        onTextChunk: (callback: (delta: string) => void) => () => void
+        onTtsAudio: (callback: (wav: ArrayBuffer) => void) => () => void
       }
       auth: {
         linear: {
@@ -46,6 +49,15 @@ declare global {
         setWeatherCity: (city: string | null) => Promise<void>
         getAppVersion: () => Promise<string>
         getTodayCostUsd: () => Promise<number | null>
+        getPttShortcut: () => Promise<string | null>
+        setPttShortcut: (key: string) => Promise<void>
+        getPiperVoice: () => Promise<string | null>
+        setPiperVoice: (name: string) => Promise<void>
+      }
+      voice: {
+        transcribe: (audio: ArrayBuffer) => Promise<string>
+        onPttStart: (callback: () => void) => () => void
+        onPttStop: (callback: () => void) => () => void
       }
     }
   }

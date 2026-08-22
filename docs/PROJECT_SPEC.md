@@ -17,7 +17,7 @@ Assistant personnel desktop inspiré de J.A.R.V.I.S. (Iron Man), distinct du sit
 ## 3. Roadmap
 
 - **V1** : texte uniquement
-- **V2** : vocal (ASR + TTS), voix féminine, non spécifié davantage dans ce document
+- **V2** : vocal (ASR + TTS) — voir section 9. « Voix féminine » : dépend de la voix Piper choisie par Axel (`fr_FR-siwis-medium` suggéré par défaut dans l'écran paramètres, non vérifié contre le catalogue réel — réseau bloqué dans ce sandbox, voir 9.3), pas de contrainte codée en dur côté app.
 
 ## 4. Architecture fonctionnelle
 
@@ -207,3 +207,65 @@ Supprimés :
 Conservés (déclenchés explicitement par une action d'Axel, pas par un timer ni un effet de bord silencieux) : la boucle de chat interactive (`chat.ts`, un envoi de message = un appel), et le parsing du profil en texte libre (`coreFactsParser.ts`, déclenché par le bouton « Enregistrer » de l'écran profil).
 
 **Effet sur la mémoire continue (4.8) et l'historique (4.6)** : la mémoire `core` (onboarding, édition manuelle) n'est pas affectée. La mémoire `peripheral` n'est plus alimentée automatiquement — reste lisible si des faits existent déjà, mais aucun nouveau fait n'est plus extrait sans mécanisme explicite (non demandé pour l'instant). L'historique glissant continue de fonctionner (20 derniers messages, spec 4.6) ; au-delà, les messages plus anciens sortent simplement de la fenêtre sans résumé de remplacement — accepté comme compromis, pas de solution de repli demandée.
+
+## 9. V2 vocal
+
+**Principe d'architecture (strict)** : le vocal n'est pas un système à part — c'est une entrée alternative (ASR) et une sortie alternative (TTS) qui se greffent sur le pipeline de chat existant, sans branche spéciale. Concrètement : `sendChat()` (`src/main/claude/chat.ts`) est totalement inchangée par le vocal ; le texte transcrit passe par `runChatExchange()` côté renderer exactement comme un message tapé, avec juste un booléen `isVoice` transmis à l'IPC pour activer la synthèse — toute la logique voix (découpage en phrases, dispatch Piper) vit à la frontière IPC (`src/main/ipc/chat.ts`), jamais dans le cœur du pipeline.
+
+### 9.1 Déclenchement (push-to-talk)
+
+Deux déclencheurs, unifiés vers la même machine à états d'enregistrement (`startRecording`/`stopRecording`, `App.tsx`) :
+
+- **Bouton micro du HUD** : maintien réel (`onPointerDown`/`onPointerUp`/`onPointerLeave`), pas un clic-bascule comme avant le V2 — `getUserMedia` + `MediaRecorder` (renderer), format d'enregistrement natif du navigateur (webm/opus).
+- **Raccourci clavier global** (configurable, écran paramètres → VOIX, F1-F12) : `Electron.globalShortcut` ne fournit que des déclenchements ponctuels, pas de keydown/keyup pour un vrai maintien — utilisé `uiohook-napi` à la place (binaires précompilés macOS/Windows/Linux, pas de compilation requise). Le main process pousse `ptt:start`/`ptt:stop` au renderer (`src/main/voice/ptt.ts`), qui appelle les mêmes fonctions que le bouton micro.
+
+**Permission macOS requise** (comme pour la capture d'écran, spec 8.7) : Réglages système → Confidentialité et sécurité → Surveillance des saisies (Input Monitoring), sinon uiohook ne reçoit silencieusement aucun événement clavier.
+
+Pas de wake word en continu (hors scope V2.0, prévu pour une itération suivante) — aucun code d'écoute permanente du micro.
+
+### 9.2 Transcription (ASR)
+
+Whisper local via `whisper.cpp`, intégré par le wrapper npm `nodejs-whisper` (`src/main/voice/asr.ts`) plutôt qu'un binding fait main : vendorise le source whisper.cpp et le compile localement au premier besoin (cmake/make, aucun binaire précompilé à distribuer), télécharge le modèle GGML choisi depuis Hugging Face au premier besoin également. Gratuit, 100% local, aucun service cloud.
+
+- **Modèle retenu : `base` (multilingue)**, compromis latence/précision — `tiny` est plus rapide mais nettement moins précis en français, `small` (~3x plus lourd) apporte un gain de précision qui compte peu pour de courtes requêtes vocales. **Non mesuré en conditions réelles** (réseau bloqué dans ce sandbox de développement, impossible de télécharger un modèle réel pour comparer) — décision motivée par la littérature/communauté whisper.cpp, pas par un benchmark local. Changeable dans `asr.ts` si l'usage réel montre que `small` vaut le coût.
+- Audio renderer (webm/opus) → converti en WAV 16 kHz mono via `ffmpeg` (prérequis externe, comme pour Piper) avant d'être passé à whisper.cpp.
+- **Détail d'implémentation vérifié dans le code source de whisper.cpp** (pas supposé) : la valeur de retour de `nodewhisper()` est la sortie console brute et verbeuse de `whisper-cli` (avec horodatages), pas un transcript propre — le texte propre (un segment par ligne, sans horodatage) est écrit dans un fichier `<entrée>.txt` par le flag `-otxt` (`cli.cpp::output_txt`). `asr.ts` lit ce fichier directement plutôt que de faire confiance à la valeur de retour.
+- Langue forcée à `fr` (paramètre `-l`) plutôt que `auto` : meilleure précision/latence quand la langue est connue à l'avance.
+
+### 9.3 Synthèse vocale (TTS)
+
+Piper (gratuit, local), démarré à la demande — jamais au lancement de l'app, uniquement au premier besoin de synthèse (cohérent avec la discipline « appels strictement à la demande », 8.11, même si Piper n'est pas un appel Claude).
+
+**Déviation par rapport au texte de la spec** : pas de binding npm direct — Piper est distribué soit en binaire autonome (releases GitHub historiques `rhasspy/piper`, limitées à Linux, pas de build macOS), soit via le paquet Python `piper-tts` (`pip install "piper-tts[http]"`), qui est la distribution actuelle et multiplateforme (projet transféré à `OHF-Voice/piper1-gpl`). Gaia pilote `python3 -m piper.http_server` en subprocess (`src/main/voice/tts.ts`) plutôt que le CLI `piper` : le CLI recharge le modèle à chaque appel (lent), alors que le serveur HTTP le charge une fois puis répond vite à chaque requête — nécessaire pour tenir la latence phrase par phrase demandée. **Prérequis non documentés dans la spec initiale, ajoutés au README** : `python3` et `pip install "piper-tts[http]"`.
+
+- **Streaming phrase par phrase** : la boucle d'outils (`toolLoop.ts`) utilise désormais `client.beta.messages.stream()` au lieu de `.create()` (tous les appels, pas seulement en mode vocal — un seul chemin de code, pas de branche spéciale), avec un callback `onTextDelta` optionnel. Côté IPC (`ipc/chat.ts`), en mode vocal, chaque delta alimente un découpage naïf par ponctuation forte + espace (`/(?<=[.!?])\s+/`) ; chaque phrase complète est synthétisée dès qu'elle est détectée, mise en file (chaînage de promesses, ordre garanti) et poussée au renderer via `chat:ttsAudio`. Le reste du buffer est vidé comme dernière phrase une fois le flux terminé.
+- **Bénéfice collatéral pour le texte tapé** : le passage au streaming fait que les réponses s'affichent maintenant progressivement dans le panneau de chat (spec 8.9), pas d'un bloc — corrige au passage la limite documentée en 8.2 (« l'état responding ne reste affiché que brièvement, pas de streaming réel »).
+- **Voix française** : aucune voix précise n'est codée en dur par défaut — le nom de voix Piper (ex. `fr_FR-siwis-medium`, suggéré comme exemple dans l'écran paramètres) doit être confirmé/choisi par Axel via `python3 -m piper.download_voices` sur sa machine et saisi dans Paramètres → VOIX. Choix délibéré : le catalogue de voix (hébergé sur Hugging Face) n'est pas accessible depuis ce sandbox de développement pour vérifier qu'un nom précis existe réellement — plutôt que d'écrire en dur un nom non vérifié comme s'il s'agissait d'un fait établi, il reste un réglage explicite.
+- Sans voix configurée, la synthèse est silencieusement ignorée (`if (!voiceName) return` dans `dispatchTts`) — Gaia répond en texte comme avant le V2, sans erreur ni blocage.
+- **Lecture côté renderer** : chaque WAV reçu est mis en file (`audioQueueRef`) et joué via `HTMLAudioElement` dans l'ordre de réception, jamais en parallèle — le renderer a déjà un chemin de sortie audio fonctionnel (page web), pas besoin d'une lib de lecture audio native côté main.
+
+### 9.4 États HUD pendant la voix
+
+Réutilisation stricte des états existants (spec 8.2), rien de nouveau créé côté visuel :
+
+- `listening` : dès `startRecording()` (bouton maintenu ou `ptt:start` reçu), jusqu'à `stopRecording()`.
+- `thinking` : « Transcription... » pendant l'appel à whisper.cpp, puis les états `thinking` habituels de la boucle de chat (déjà émis par `toolLoop.ts`, aucun changement nécessaire).
+- `responding` : réutilisé pour la durée de la lecture audio (pas seulement le bref instant entre réponse API et affichage comme avant le streaming) — posé à chaque phrase mise en lecture (`playNextInQueue`), retombe à `idle` quand la file audio se vide. Si aucune voix n'est configurée (aucun `chat:ttsAudio` ne sera jamais émis), repli sur `idle` après une brève marge (500 ms) plutôt que de rester bloqué sur `responding`.
+
+Hors scope V2.0 (explicitement demandé de ne pas anticiper) : wake word en continu, interruption de Gaia en cours de parole (barge-in) — aucun code d'écoute permanente ni de gestion d'interruption n'a été ajouté.
+
+### Vérifié / non vérifié
+
+Vérifié directement dans ce sandbox (sans clé Anthropic ni accès réseau à Hugging Face/GitHub releases) :
+- Compilation réelle de whisper.cpp (cmake + make, binaire `whisper-cli` obtenu et fonctionnel) et rejet propre d'un modèle invalide (`whisper_model_load: invalid model data`) — confirme toute la chaîne jusqu'au chargement du modèle.
+- Pipeline complet renderer → IPC → ffmpeg → nodejs-whisper → whisper-cli, avec un vrai fichier webm/opus généré par ffmpeg, via l'app Electron buildée et Playwright avec device micro simulé (`--use-fake-device-for-media-stream`).
+- Push-to-talk réel au bouton micro (maintien souris + `getUserMedia` simulé) et au raccourci global (événement `ptt:start`/`ptt:stop` poussé directement, uiohook-napi lui-même vérifié séparément — `uIOhook.start()` fonctionne sous Xvfb).
+- Découpage en phrases (`extractSentences`) sur un flux de deltas simulé — phrases complètes extraites au bon moment, reste correctement conservé.
+- Installation réelle de `piper-tts` (PyPI, atteignable) et comportement du serveur HTTP : démarrage, CLI réel (`-m`, `--host`, `--port` confirmés dans le code source), échec rapide et clair sur un modèle introuvable.
+- File de lecture audio et transitions d'état HUD (`responding` → `idle`) confirmées par observation directe des transitions (MutationObserver) — la lecture audio elle-même échoue dans ce sandbox Xvfb (`NotSupportedError`, pas de device audio fonctionnel), gérée proprement par repli sur la phrase suivante plutôt qu'un blocage.
+- Persistance réelle des réglages voix (raccourci, nom de voix) contre Postgres/PostgREST local.
+
+Non vérifié (réseau bloqué vers Hugging Face et les releases GitHub dans ce sandbox, pas de device audio) :
+- Téléchargement réel d'un modèle whisper.cpp ou d'une voix Piper, et donc la précision/latence réelle de la transcription et la qualité audio de la synthèse.
+- Lecture audio réelle de bout en bout (dépend d'un device audio fonctionnel, absent de ce sandbox).
+- Fonctionnement du raccourci global sur un vrai événement clavier OS (uiohook lui-même vérifié isolément, mais pas via une frappe physique simulée à ce niveau).

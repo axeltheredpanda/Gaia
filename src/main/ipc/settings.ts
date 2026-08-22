@@ -3,7 +3,11 @@ import {
   getRssFeedOverride,
   getWeatherCityOverride,
   setRssFeeds,
-  setWeatherCityOverride
+  setWeatherCityOverride,
+  getPttShortcutKey,
+  setPttShortcutKey,
+  getPiperVoiceName,
+  setPiperVoiceName
 } from '../supabase/settings'
 import { getTodayCostUsd } from '../supabase/apiUsage'
 
@@ -18,4 +22,12 @@ export function registerSettingsIpc(): void {
   })
   ipcMain.handle('settings:getAppVersion', () => app.getVersion())
   ipcMain.handle('settings:getTodayCostUsd', async () => getTodayCostUsd())
+  ipcMain.handle('settings:getPttShortcut', async () => getPttShortcutKey())
+  ipcMain.handle('settings:setPttShortcut', async (_event, key: string) => {
+    await setPttShortcutKey(key)
+  })
+  ipcMain.handle('settings:getPiperVoice', async () => getPiperVoiceName())
+  ipcMain.handle('settings:setPiperVoice', async (_event, name: string) => {
+    await setPiperVoiceName(name)
+  })
 }

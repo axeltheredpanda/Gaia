@@ -4,7 +4,13 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Attachment } from './gaia.d'
 
-type Message = { role: 'user' | 'assistant'; text: string; model?: string; imageDataUri?: string | null }
+type Message = {
+  role: 'user' | 'assistant'
+  text: string
+  model?: string
+  imageDataUri?: string | null
+  streaming?: boolean
+}
 type Toast = { id: number; text: string }
 type PendingItem = (Attachment & { name: string }) | { kind: 'docx'; name: string; text: string }
 let nextToastId = 0
@@ -247,7 +253,7 @@ function Toasts({ toasts }: { toasts: Toast[] }): React.JSX.Element {
     <div className="toasts">
       {toasts.map((toast) => (
         <div key={toast.id} className="toast">
-          ✓ Ajouté : {toast.text}
+          {toast.text}
         </div>
       ))}
     </div>
@@ -307,20 +313,25 @@ function ProfileScreen({
   const [appVersion, setAppVersion] = useState('')
   const [todayCostUsd, setTodayCostUsd] = useState<number | null>(null)
   const [settingsSaved, setSettingsSaved] = useState(false)
+  const [pttShortcut, setPttShortcut] = useState('F9')
+  const [piperVoice, setPiperVoice] = useState('')
+  const [voiceSettingsSaved, setVoiceSettingsSaved] = useState(false)
 
   async function refresh(): Promise<void> {
     setFacts(await window.gaia.memory.getCoreFacts())
   }
 
   async function refreshSettings(): Promise<void> {
-    const [linear, googleTasks, googleCalendar, rssFeeds, city, version, cost] = await Promise.all([
+    const [linear, googleTasks, googleCalendar, rssFeeds, city, version, cost, shortcut, voice] = await Promise.all([
       window.gaia.auth.linear.status(),
       window.gaia.auth.googleTasks.status(),
       window.gaia.auth.googleCalendar.status(),
       window.gaia.settings.getRssFeeds(),
       window.gaia.settings.getWeatherCity(),
       window.gaia.settings.getAppVersion(),
-      window.gaia.settings.getTodayCostUsd()
+      window.gaia.settings.getTodayCostUsd(),
+      window.gaia.settings.getPttShortcut(),
+      window.gaia.settings.getPiperVoice()
     ])
     setLinearConnected(linear)
     setGoogleTasksConnected(googleTasks)
@@ -329,6 +340,8 @@ function ProfileScreen({
     setWeatherCity(city ?? '')
     setAppVersion(version)
     setTodayCostUsd(cost)
+    setPttShortcut(shortcut ?? 'F9')
+    setPiperVoice(voice ?? '')
   }
 
   useEffect(() => {
@@ -354,6 +367,15 @@ function ProfileScreen({
     ])
     setSettingsSaved(true)
     setTimeout(() => setSettingsSaved(false), 2000)
+  }
+
+  async function handleSaveVoiceSettings(): Promise<void> {
+    await Promise.all([
+      window.gaia.settings.setPttShortcut(pttShortcut),
+      window.gaia.settings.setPiperVoice(piperVoice.trim())
+    ])
+    setVoiceSettingsSaved(true)
+    setTimeout(() => setVoiceSettingsSaved(false), 2000)
   }
 
   async function handleDelete(id: number): Promise<void> {
@@ -473,6 +495,33 @@ function ProfileScreen({
               </button>
             </div>
 
+            <h2>VOIX (V2)</h2>
+            <label className="category">Raccourci push-to-talk global (redémarrage requis)</label>
+            <select value={pttShortcut} onChange={(e) => setPttShortcut(e.target.value)}>
+              {Array.from({ length: 12 }, (_, i) => `F${i + 1}`).map((key) => (
+                <option key={key} value={key}>
+                  {key}
+                </option>
+              ))}
+            </select>
+            <label className="category">
+              Voix Piper (ex. fr_FR-siwis-medium — voir « python3 -m piper.download_voices »)
+            </label>
+            <input
+              value={piperVoice}
+              onChange={(e) => setPiperVoice(e.target.value)}
+              placeholder="fr_FR-siwis-medium"
+            />
+            <p>
+              Maintenez le bouton micro ou le raccourci ci-dessus pour parler à Gaia. La réponse est lue à
+              voix haute uniquement si une voix Piper est configurée ici.
+            </p>
+            <div className="profile-actions">
+              <button type="button" className="primary" onClick={handleSaveVoiceSettings}>
+                {voiceSettingsSaved ? 'Enregistré ✓' : 'Enregistrer la voix'}
+              </button>
+            </div>
+
             <h2>À PROPOS</h2>
             <p>Gaia {appVersion && `v${appVersion}`}</p>
             <p>Coût API aujourd&apos;hui : {todayCostUsd !== null ? `$${todayCostUsd.toFixed(3)}` : '--'}</p>
@@ -539,6 +588,105 @@ export default function App(): React.JSX.Element {
     return window.gaia.hud.onState(setHudState)
   }, [])
 
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const isRecordingRef = useRef(false)
+
+  const audioQueueRef = useRef<HTMLAudioElement[]>([])
+  const isPlayingRef = useRef(false)
+  const ttsActiveRef = useRef(false)
+
+  /** File de lecture des phrases synthétisées par Piper (spec V2 vocal 3) — lues dans l'ordre de réception, jamais en parallèle (chaque phrase attend la fin de la précédente). */
+  function playNextInQueue(): void {
+    const next = audioQueueRef.current.shift()
+    if (!next) {
+      isPlayingRef.current = false
+      setHudState({ state: 'idle' })
+      return
+    }
+    isPlayingRef.current = true
+    setHudState({ state: 'responding' })
+    next.onended = () => {
+      URL.revokeObjectURL(next.src)
+      playNextInQueue()
+    }
+    next.play().catch(() => playNextInQueue())
+  }
+
+  useEffect(() => {
+    return window.gaia.chat.onTtsAudio((wav) => {
+      ttsActiveRef.current = true
+      const url = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }))
+      audioQueueRef.current.push(new Audio(url))
+      if (!isPlayingRef.current) playNextInQueue()
+    })
+  }, [])
+
+  /**
+   * Enregistrement micro (spec V2 vocal) — point d'entrée commun au bouton mic (pointerdown/up,
+   * maintien natif du DOM) et au raccourci global push-to-talk (ptt:start/stop poussés par uiohook
+   * côté main, spec 1) : les deux déclencheurs partagent exactement cette même machine à états.
+   */
+  async function startRecording(): Promise<void> {
+    if (isRecordingRef.current) return
+    isRecordingRef.current = true
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      audioChunksRef.current = []
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop())
+        void finishRecording()
+      }
+      mediaRecorderRef.current = recorder
+      recorder.start()
+      setHudState({ state: 'listening' })
+    } catch (err) {
+      isRecordingRef.current = false
+      pushToasts([`⚠ Micro : ${err instanceof Error ? err.message : 'accès refusé'}`])
+    }
+  }
+
+  function stopRecording(): void {
+    if (!isRecordingRef.current) return
+    isRecordingRef.current = false
+    mediaRecorderRef.current?.stop()
+  }
+
+  async function finishRecording(): Promise<void> {
+    const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+    if (blob.size === 0) {
+      setHudState({ state: 'idle' })
+      return
+    }
+    setHudState({ state: 'thinking', detail: 'Transcription...' })
+    try {
+      const buffer = await blob.arrayBuffer()
+      const text = (await window.gaia.voice.transcribe(buffer)).trim()
+      if (!text) {
+        setHudState({ state: 'idle' })
+        return
+      }
+      // Le texte transcrit traverse le pipeline de chat existant sans branche spéciale (spec V2 vocal).
+      await runChatExchange(text, text, undefined, true)
+    } catch (err) {
+      pushToasts([`⚠ Transcription : ${err instanceof Error ? err.message : 'erreur'}`])
+      setHudState({ state: 'idle' })
+    }
+  }
+
+  useEffect(() => {
+    const offStart = window.gaia.voice.onPttStart(() => void startRecording())
+    const offStop = window.gaia.voice.onPttStop(() => stopRecording())
+    return () => {
+      offStart()
+      offStop()
+    }
+  }, [])
+
   function pushToasts(labels: string[]): void {
     const newToasts = labels.map((text) => ({ id: nextToastId++, text }))
     setToasts((prev) => [...prev, ...newToasts])
@@ -567,6 +715,62 @@ export default function App(): React.JSX.Element {
     }
   }
 
+  /**
+   * Point d'entrée unique du pipeline de chat (spec V2 vocal) : le texte transcrit par la voix
+   * appelle exactement cette même fonction que le texte tapé, sans branche spéciale — seul
+   * `isVoice` change (transmis à l'IPC pour déclencher la synthèse phrase par phrase côté main).
+   * Le flux de deltas (chat:textChunk) fait grandir une bulle assistant "en cours" au fil de la
+   * génération, bénéfice direct pour le texte tapé autant que support de la synthèse vocale.
+   */
+  async function runChatExchange(
+    displayText: string,
+    sendText: string,
+    attachments: Attachment[] | undefined,
+    isVoice = false
+  ): Promise<void> {
+    setMessages((prev) => [...prev, { role: 'user', text: displayText }])
+    setIsSending(true)
+    if (isVoice) ttsActiveRef.current = false
+
+    let streamed = ''
+    const unsubscribe = window.gaia.chat.onTextChunk((delta) => {
+      streamed += delta
+      setMessages((prev) => {
+        const last = prev[prev.length - 1]
+        const bubble = { role: 'assistant' as const, text: streamed, streaming: true }
+        return last?.streaming ? [...prev.slice(0, -1), bubble] : [...prev, bubble]
+      })
+    })
+
+    try {
+      const reply = await window.gaia.chat.send(sendText, attachments, isVoice)
+      setMessages((prev) => {
+        const last = prev[prev.length - 1]
+        const bubble = { role: 'assistant' as const, text: reply.text, model: reply.model, imageDataUri: reply.imageDataUri }
+        return last?.streaming ? [...prev.slice(0, -1), bubble] : [...prev, bubble]
+      })
+      setActiveModel(reply.model)
+      pushToasts(reply.taskActions.map((action) => `✓ Ajouté : ${action}`))
+      refreshIntegrationStatus()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erreur inconnue'
+      setMessages((prev) => [...prev, { role: 'assistant', text: `⚠ ${message}` }])
+    } finally {
+      unsubscribe()
+      setIsSending(false)
+      if (isVoice) {
+        // Laisse "responding" actif si la synthèse vocale a démarré (spec 4) — la file audio
+        // repasse elle-même à idle une fois la dernière phrase jouée. Sinon (pas de voix Piper
+        // configurée, échec silencieux), repli sur idle après une brève marge.
+        setTimeout(() => {
+          if (!ttsActiveRef.current) setHudState({ state: 'idle' })
+        }, 500)
+      } else {
+        setHudState({ state: 'idle' })
+      }
+    }
+  }
+
   async function handleSubmit(event: React.FormEvent): Promise<void> {
     event.preventDefault()
     const text = input.trim()
@@ -579,27 +783,9 @@ export default function App(): React.JSX.Element {
     const docxPrefix = docxTexts.map((d) => `[Contenu de ${d.name}]\n${d.text}`).join('\n\n')
     const finalText = docxPrefix ? `${docxPrefix}\n\n${text}` : text
 
-    setMessages((prev) => [...prev, { role: 'user', text: text || `[${pendingAttachments.length} fichier(s)]` }])
     setInput('')
     setPendingAttachments([])
-    setIsSending(true)
-
-    try {
-      const reply = await window.gaia.chat.send(finalText, attachments)
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', text: reply.text, model: reply.model, imageDataUri: reply.imageDataUri }
-      ])
-      setActiveModel(reply.model)
-      pushToasts(reply.taskActions)
-      refreshIntegrationStatus()
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erreur inconnue'
-      setMessages((prev) => [...prev, { role: 'assistant', text: `⚠ ${message}` }])
-    } finally {
-      setIsSending(false)
-      setHudState({ state: 'idle' })
-    }
+    await runChatExchange(text || `[${pendingAttachments.length} fichier(s)]`, finalText, attachments)
   }
 
   const stateLabel =
@@ -738,7 +924,10 @@ export default function App(): React.JSX.Element {
             <button
               type="button"
               className={`iconbtn mic ${hudState.state === 'listening' ? 'active' : ''}`}
-              onClick={() => setHudState((prev) => ({ state: prev.state === 'listening' ? 'idle' : 'listening' }))}
+              title="Maintenir pour parler (push-to-talk)"
+              onPointerDown={() => void startRecording()}
+              onPointerUp={stopRecording}
+              onPointerLeave={stopRecording}
             >
               <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.6">
                 <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />

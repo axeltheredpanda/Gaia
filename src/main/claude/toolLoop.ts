@@ -66,6 +66,8 @@ export interface ToolLoopOptions {
   usageLabel?: string
   /** Uniquement pour un appel déclenché par l'utilisateur — le rafraîchissement du badge HUD en tâche de fond ne doit jamais faire clignoter l'état "thinking" à l'insu de l'utilisateur. */
   emitHudEvents?: boolean
+  /** Deltas de texte au fil de la génération (spec V2 vocal : la synthèse vocale phrase par phrase en a besoin, pas d'attendre la réponse complète). */
+  onTextDelta?: (delta: string) => void
 }
 
 export interface ToolLoopResult {
@@ -150,7 +152,7 @@ export async function runToolLoop(
 
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
     if (emitEvents) emitHudState('thinking')
-    const response = await client.beta.messages.create({
+    const stream = client.beta.messages.stream({
       model: options.model,
       max_tokens: options.maxTokens,
       betas: ['mcp-client-2025-11-20'],
@@ -159,6 +161,8 @@ export async function runToolLoop(
       mcp_servers: mcpServers,
       messages: working
     })
+    if (options.onTextDelta) stream.on('text', options.onTextDelta)
+    const response = await stream.finalMessage()
     void logApiUsage(options.usageLabel ?? 'chat', options.model, response.usage)
 
     working.push({ role: 'assistant', content: response.content })
