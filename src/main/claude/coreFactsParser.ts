@@ -1,5 +1,6 @@
 import { getClaudeClient } from './client'
 import { upsertCoreFact } from '../supabase/memory'
+import { logApiUsage } from '../supabase/apiUsage'
 
 const PARSE_TOOL = {
   name: 'record_core_facts',
@@ -34,13 +35,15 @@ const PARSE_TOOL = {
  */
 export async function parseFreeTextToCoreFacts(freeText: string): Promise<void> {
   const client = getClaudeClient()
+  const model = 'claude-haiku-4-5-20251001'
   const response = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
+    model,
     max_tokens: 1024,
     tools: [PARSE_TOOL],
     tool_choice: { type: 'tool', name: 'record_core_facts' },
     messages: [{ role: 'user', content: `Découpe ce texte en faits durables distincts, un fait par idée :\n\n${freeText}` }]
   })
+  void logApiUsage('core_facts_parse', model, response.usage)
 
   const toolUse = response.content.find((block) => block.type === 'tool_use')
   if (!toolUse || toolUse.type !== 'tool_use') return

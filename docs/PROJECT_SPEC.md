@@ -66,9 +66,9 @@ Si l'heuristique se révèle insuffisante en usage réel, ajouter un classificat
 ### 4.6 Assemblage du contexte à chaque requête
 
 - **System prompt statique et caché** (prompt caching Anthropic) : persona, comportement proactif todo, style de réponse, plus le bloc des faits mémoire **tier = core** (voir 4.9) — tout ce bloc est stable et regroupé dans le seul segment marqué `cache_control`.
-- **Date et heure** : une ligne « Nous sommes le [date] à [heure] », recalculée à chaque requête et injectée **hors** du bloc caché (jamais de `cache_control` sur ce segment), sans quoi elle se fige au moment de la création du cache. Instruction explicite dans le prompt système : comparer toujours les échéances à cette date, une date antérieure n'est jamais « prochaine » ni « à venir ». Même traitement pour le prompt du badge HUD (4.6 suivant), qui n'a pas de bloc caché du tout mais doit recevoir la même ligne fraîche à chaque rafraîchissement.
-- **Cache HUD séparé** : badge léger (ex. « 3 tâches aujourd'hui ») visible dès l'ouverture de l'appli, rafraîchi en tâche de fond toutes les 10-15 minutes, stocké dans Supabase, indépendant du prompt système.
-- **Historique de conversation en fenêtre glissante** : les 15-20 derniers messages tels quels ; au-delà, résumé périodique via un call Haiku, stocké dans Supabase.
+- **Date et heure** : une ligne « Nous sommes le [date] à [heure] », recalculée à chaque requête et injectée **hors** du bloc caché (jamais de `cache_control` sur ce segment), sans quoi elle se fige au moment de la création du cache. Instruction explicite dans le prompt système : comparer toujours les échéances à cette date, une date antérieure n'est jamais « prochaine » ni « à venir ».
+- **Cache HUD séparé** : badge léger (ex. « 3 tâches aujourd'hui ») visible dès l'ouverture de l'appli, stocké dans Supabase, indépendant du prompt système. *Révisé (8.11)* : ne se rafraîchit plus tout seul en tâche de fond — affiche la dernière valeur en cache s'il y en a une.
+- **Historique de conversation en fenêtre glissante** : les 15-20 derniers messages tels quels. *Révisé (8.11)* : au-delà, les messages plus anciens sortent de la fenêtre sans résumé de remplacement — le résumé automatique via Haiku a été supprimé (appel API silencieux non désiré).
 - **Faits mémoire tier = peripheral pertinents au sujet en cours** : récupérés par mots-clés (voir 4.9), injectés en dehors du bloc caché puisqu'ils varient à chaque requête.
 - **Secrets OAuth** (Linear, Google) : stockés dans Supabase Vault, jamais en clair dans une table classique.
 
@@ -82,13 +82,13 @@ Le contexte todo (Linear, Google Tasks) est du temps réel récupéré à la dem
 
 - `id`, `category` (texte libre : travail, habitudes, personnes, préférences, projets…), `tier` (`core` | `peripheral`), `content`, `created_at`, `updated_at`.
 
-**Écriture (extraction continue)** : après chaque échange, un call Haiku relit l'échange et les faits `peripheral` pertinents existants (même retrieval par mots-clés que la lecture), et décide s'il y a un fait durable à ajouter ou mettre à jour — toujours upsert sur un fait proche existant plutôt que dupliquer (le call fournit son id pour une mise à jour, l'omet pour une création ; c'est le modèle qui juge la similarité, pas un algorithme de similarité maison). Sortie forcée via tool use pour un résultat structuré fiable. N'écrit **jamais** que du tier `peripheral` — le code applique un filtre `tier = 'peripheral'` sur la requête d'écriture elle-même, pas seulement par convention, donc ce chemin ne peut structurellement jamais toucher un fait `core`.
+**Écriture (extraction continue) — supprimée (8.11)** : après chaque échange, un call Haiku relisait l'échange et décidait s'il y avait un fait `peripheral` durable à ajouter ou mettre à jour (upsert sur un fait proche existant, sortie forcée via tool use, jamais que du tier `peripheral` par construction de la requête). Retirée avec les autres appels API automatiques (Axel : trop coûteux en tokens sans qu'il l'ait demandé) — plus aucun nouveau fait `peripheral` n'est extrait automatiquement.
 
 **Lecture (deux niveaux)** :
 - `core` : injecté intégralement et systématiquement dans le bloc caché du system prompt (voir 4.6), jamais filtré, jamais omis.
-- `peripheral` : récupéré par mots-clés simples selon le sujet de la requête en cours — matching basique (normalisation des accents, filtrage des mots courants, substring), pas de recherche sémantique/pgvector pour cette V1. À revoir si le mot-clé s'avère insuffisant à l'usage.
+- `peripheral` : toujours lu (SELECT Supabase, gratuit) par mots-clés simples selon le sujet de la requête en cours si des faits existent déjà — mais plus jamais alimenté automatiquement depuis 8.11.
 
-**Règle des tiers (stricte)** : `core` vient exclusivement de l'onboarding et des éditions manuelles du profil ; `peripheral` vient exclusivement de l'extraction automatique. Pas de promotion automatique `peripheral` → `core` pour cette V1.
+**Règle des tiers (stricte)** : `core` vient exclusivement de l'onboarding et des éditions manuelles du profil ; `peripheral` ne vient plus que de faits déjà en base avant 8.11 (plus de source d'écriture active). Pas de promotion automatique `peripheral` → `core` pour cette V1.
 
 ### 4.9 Onboarding et profil
 
@@ -113,17 +113,26 @@ Référence visuelle : capture d'écran fournie par l'utilisateur (fenêtre somb
 
 ### 8.1 Briefing proactif météo/actu
 
-Étend le job Haiku existant du badge HUD (`src/main/claude/hudBadge.ts`, toutes les 12 min) plutôt qu'un mécanisme séparé : deux tools client (`get_weather`, `get_news`) ajoutés à la même boucle d'outils que le reste (`toolLoop.ts`), disponibles aussi bien pour ce job que pour le chat interactif.
+**Révisé (8.11)** : le job Haiku en tâche de fond décrit ci-dessous a été supprimé après coup — plus aucun appel automatique. Les tools `get_weather`/`get_news` restent disponibles, mais uniquement dans la boucle de chat interactive (`toolLoop.ts`), à la demande explicite d'Axel.
 
 - **Météo** : Open-Meteo, gratuit sans clé — géocodage (`geocoding-api.open-meteo.com`) puis prévisions (`api.open-meteo.com`). Ville par défaut déduite des faits `core` du profil (injectés dans le prompt du job), avec possibilité de forcer une ville via `app_settings.weather_city_override` (écran paramètres, 8.8).
-- **Actu** : `rss-parser`, gratuit sans clé, un titre par flux sur trois flux par défaut (tech, finance, actu générale), remplaçables via `app_settings.rss_feeds`.
+- **Actu** : `rss-parser`, gratuit sans clé. Sources fixées explicitement (pas de choix ouvert, après un premier test ayant remonté un article hors-sujet) : Le Monde (générale), Les Echos finance/marchés (finance), TechCrunch (tech) — remplaçables via `app_settings.rss_feeds`.
 - Nouvelle table `app_settings` (migration 0004) — une seule ligne, réglages simples, pas de gestion multi-profil.
 
 ### 8.2 États HUD différenciés
 
-Un seul flux d'événements (`hud:state`, poussé du main vers le renderer via `webContents.send`, jamais de polling) pilote à la fois le label texte et l'intensité de l'animation du réseau de particules — pas deux systèmes séparés. États : `idle`, `listening` (bascule micro, purement local — pas d'ASR réelle avant la V2), `thinking` (avant chaque appel API, avec un libellé détaillé pour les tools exécutés côté client : "Consulte la météo...", "Recherche une image...", etc.), `responding` (réponse finale prête). Gardé à l'écart du rafraîchissement du badge HUD en tâche de fond (`emitHudEvents` désactivé par défaut dans `toolLoop.ts`) pour ne jamais faire clignoter l'état à l'insu de l'utilisateur toutes les 12 minutes.
+Un seul flux d'événements (`hud:state`, poussé du main vers le renderer via `webContents.send`, jamais de polling) pilote à la fois le label texte et l'animation du réseau de particules (`NetworkCanvas` dans `App.tsx`) — pas deux systèmes séparés, l'état est lu via un ref à chaque frame plutôt qu'une dépendance d'effet (la simulation ne redémarre jamais à un changement d'état). États, avec un comportement visuel distinct par état plutôt qu'un simple facteur d'intensité (révisé après retour utilisateur) :
 
-**Limite technique assumée** : Linear et `web_search` s'exécutent côté serveur Anthropic à l'intérieur d'un seul appel API — impossible d'avoir un signal "en cours" pendant leur exécution propre, seul le "thinking" générique avant l'appel les couvre. Le libellé détaillé par tool n'est donc précis que pour les tools exécutés côté client (Google Tasks, recherche d'image, météo, actu).
+- `idle` : dérive lente, pulsation faible, opacité tamisée.
+- `listening` (bascule micro, purement local — pas d'ASR réelle avant la V2) : nœuds resserrés vers le centre (rayon de confinement réduit), pulsation plus rapide, accent plus lumineux.
+- `thinking` (avant chaque appel API, libellé détaillé pour les tools exécutés côté client : "Consulte la météo...", "Recherche une image...", etc.) : le maillage habituel est remplacé par des points lumineux voyageant le long de spokes vers le centre (effet flux de données), pas un pulse statique.
+- `responding` (réponse finale prête) : le cœur central (dégradé radial) est figé à son intensité maximale — sans oscillation — plutôt que de pulser.
+
+`emitHudEvents` reste désactivé par défaut dans `toolLoop.ts` (activé explicitement dans `chat.ts` uniquement) — non déterminant aujourd'hui puisque le job en tâche de fond qui aurait pu en abuser a été supprimé (8.11), mais le garde-fou structurel reste en place.
+
+**Densité proportionnelle à la taille du canvas** : le nombre de nœuds et la distance de connexion sont calculés à partir de la taille réelle du canvas (`Math.min(largeur, hauteur)`) plutôt que des constantes fixes — nécessaire depuis que le réseau existe aussi en petit format dans le bandeau mini du panneau de chat (8.9) : des constantes pensées pour la grande sphère centrée produisaient un amas dense illisible dans un petit espace.
+
+**Limites techniques assumées** : Linear et `web_search` s'exécutent côté serveur Anthropic à l'intérieur d'un seul appel API — impossible d'avoir un signal "en cours" pendant leur exécution propre, seul le "thinking" générique avant l'appel les couvre. Le libellé détaillé par tool n'est donc précis que pour les tools exécutés côté client (Google Tasks, recherche d'image, météo, actu). De même, l'état `responding` n'est pas soutenu "tant que le texte s'écrit" au sens littéral : les réponses ne sont pas diffusées en streaming (l'API est appelée en mode non-streaming, le texte apparaît d'un bloc), donc cet état ne reste affiché que brièvement entre la réponse de l'API et son affichage — passer en streaming résoudrait ça mais n'était pas dans le périmètre de cette itération.
 
 ### 8.3 Google Calendar
 
@@ -150,7 +159,7 @@ Détection d'une URL dans le message (`src/main/tools/webPage.ts`) : le main pro
 
 ### 8.7 Capture d'écran à la demande
 
-Nouveau tool client `capture_screenshot` (`src/main/tools/screenshot.ts`), ajouté uniquement à la boucle de chat interactive (`includeScreenshotTool: true` dans `chat.ts`) — jamais au job de badge HUD en tâche de fond, garantissant qu'il ne peut structurellement jamais se déclencher hors d'une demande explicite d'Axel. Le modèle choisit `active_window` ou `screen` selon la formulation d'Axel (paramètre du tool, pas de parsing regex fragile côté app). `Electron.desktopCapturer` fournit l'image ; contrairement à `search_image` (affichage seul), l'image est ici renvoyée au modèle comme bloc `image` dans le `tool_result` — Axel peut poser des questions sur le contenu de la capture. Aucune source disponible (permission macOS manquante ou refusée) → message de repli explicite indiquant Réglages → Confidentialité et sécurité → Enregistrement d'écran.
+Nouveau tool client `capture_screenshot` (`src/main/tools/screenshot.ts`), ajouté uniquement à la boucle de chat interactive (`includeScreenshotTool: true` dans `chat.ts`), garantissant qu'il ne peut structurellement jamais se déclencher hors d'une demande explicite d'Axel. Le modèle choisit `active_window` ou `screen` selon la formulation d'Axel (paramètre du tool, pas de parsing regex fragile côté app). `Electron.desktopCapturer` fournit l'image ; contrairement à `search_image` (affichage seul), l'image est ici renvoyée au modèle comme bloc `image` dans le `tool_result` — Axel peut poser des questions sur le contenu de la capture. Aucune source disponible (permission macOS manquante ou refusée) → message de repli explicite indiquant Réglages → Confidentialité et sécurité → Enregistrement d'écran.
 
 **Limite documentée** : pas d'API Electron multiplateforme pour identifier « la fenêtre active » — la première source retournée par `desktopCapturer` (généralement la plus récemment au premier plan) est utilisée par convention.
 
@@ -163,3 +172,38 @@ Extension du même `ProfileScreen` déjà utilisé pour l'onboarding et l'éditi
 - **À propos** : version de l'app (`app.getVersion()`).
 
 **Bug corrigé en marge (re-vérification demandée)** : `disconnectLinear()` écrit une chaîne vide dans Supabase Vault, mais `getLinearAuthorizationToken()` renvoyait cette chaîne vide telle quelle (`return stored`) au lieu de `null` — `isLinearConnected()` (qui teste `!== null`) considérait donc à tort la déconnexion comme toujours connectée. La pastille sidebar elle-même était déjà correctement câblée (vérifié en vidant/repeuplant Vault) ; le bug ne se manifestait qu'après un clic sur Déconnecter. Corrigé à la racine (`stored || null`), pas dans l'appelant. Google Calendar n'était pas affecté (`loadTokenBundle` testait déjà `!stored` correctement).
+
+### 8.9 Refonte de l'affichage du chat
+
+Priorité suite à un retour utilisateur négatif : le markdown ne se rendait pas (gras affiché en `**texte**` littéral) et seule la dernière réponse était visible (`.last-reply`), sans historique consultable, flottant par-dessus l'animation sans conteneur.
+
+- **Rendu markdown** : `react-markdown` + `remark-gfm` (gras, listes, code, liens, tableaux) pour les réponses de Gaia. Les messages utilisateur restent en texte brut (pas de markdown à interpréter dans ce qu'Axel tape).
+- **Panneau de conversation** : `ChatPanel` (nouveau composant, `App.tsx`) — historique complet scrollable, bulles visuellement distinctes utilisateur (alignées à droite, fond `--accent-soft`) / Gaia (alignées à gauche, fond `--bg-panel`), auto-scroll vers le bas à chaque nouveau message (`scrollIntoView`).
+- **Réseau organique + label "GAIA"** : pleine taille centrée uniquement à l'état vide (`messages.length === 0`, `.stage`). Dès le premier message, réduits en bandeau (`.stage-mini`, 76px de haut) en haut du panneau de chat, pour laisser la place à la conversation.
+- **Garde de navigation ajoutée en marge** : un lien markdown cliqué naviguait la fenêtre de l'app elle-même (aucun `will-navigate` n'était en place, seul `setWindowOpenHandler` existait pour les popups) — un lien dans une réponse aurait fait quitter l'UI de Gaia. Corrigé dans `src/main/index.ts` : toute navigation vers une origine différente de celle de l'app est interceptée et ouverte dans le navigateur système (`shell.openExternal`) à la place.
+
+Vérifié : rendu markdown (gras, liste, code inline, lien) confirmé pixel par pixel dans un navigateur réel (bundle isolé de `ReactMarkdown`+`remarkGfm`, contournant l'impossibilité de mocker `window.gaia.chat.send` — l'objet exposé par `contextBridge` est gelé, une tentative de réaffectation échoue silencieusement) ; transition état vide → panneau de chat → retour à l'état vide, accumulation des messages et alternance des bulles vérifiées via Playwright contre l'app buildée.
+
+### 8.10 Maîtrise des coûts
+
+Suite à ~2$ dépensés sur un premier jour de test réel :
+
+- **Job de badge HUD limité au premier plan, puis supprimé (voir 8.11)** : d'abord gaté sur `isMainWindowFocused()`, puis retiré entièrement — Axel a demandé la suppression complète de tout appel API automatique, pas seulement sa limitation.
+- **Log de coût par appel** (`api_usage_log`, migration 0005 ; `src/main/supabase/apiUsage.ts`) : chaque appel `messages.create`/`beta.messages.create` logue modèle, tokens input/output/cache read/cache write (avec répartition 5 min / 1h), et un coût `$` calculé à partir des tarifs standard. Best-effort, jamais bloquant. Le coût du jour est affiché dans l'écran paramètres (« À propos »), via un nouvel IPC `settings:getTodayCostUsd`. Seuls les 2 points d'appel restants après 8.11 (boucle de chat, parsing du profil) sont désormais loggés — tous deux explicitement déclenchés par Axel.
+- **Routing Haiku/Sonnet vérifié en pratique** : sur un échantillon de 40 messages représentatifs d'un usage réel (salutations, ajouts de todo, météo, questions ouvertes, croisement calendrier/tâches…), l'heuristique (`router.ts`) envoie 73 % vers Haiku, 27 % vers Sonnet — confirme l'hypothèse théorique, aucun correctif nécessaire.
+- **Cache TTL étendu à 1h** : le bloc système caché (persona + faits core, `chat.ts`) passe de `cache_control: {type: 'ephemeral'}` (5 min) à `{type: 'ephemeral', ttl: '1h'}` — plus adapté à un usage réel probablement intermittent dans la journée (l'écart entre deux échanges dépasse souvent 5 min). Coût d'écriture doublé (2× au lieu de 1.25×) mais rentable dès 3 requêtes dans la fenêtre d'1h contre 2 pour le 5 min.
+
+Non vérifié en conditions réelles (pas de clé Anthropic disponible dans ce sandbox) : l'impact chiffré effectif sur la facture réelle d'Axel — seule la logique (gating focus, calcul de coût, TTL) est vérifiée directement.
+
+### 8.11 Appels API strictement à la demande
+
+Déviation demandée en cours de session, par-dessus 8.10 : au-delà de limiter les appels automatiques, les supprimer entièrement. Un seul appel Claude par action explicite d'Axel — plus aucun appel déclenché par un timer ou en arrière-plan d'un échange.
+
+Supprimés :
+- **Job de badge HUD** (`src/main/claude/hudBadge.ts`, supprimé) — rafraîchissait `hud_cache` toutes les 12 minutes. Le badge « tâches aujourd'hui » de la statusbar affiche désormais la dernière valeur en cache s'il y en a une (lecture Supabase seule, gratuite), sans plus jamais se rafraîchir tout seul.
+- **Extraction mémoire automatique** (`src/main/claude/memoryExtraction.ts`, supprimé) — un call Haiku après chaque échange pour détecter des faits `peripheral` à mémoriser (spec 4.8). `upsertPeripheralFact` (écriture) retiré de `supabase/memory.ts` avec elle ; la lecture (`getPeripheralFactsForQuery`/`getPeripheralFactsBlock`) reste, elle ne coûte rien (SELECT Supabase).
+- **Résumé de conversation automatique** (`maybeSummarize()` dans `supabase/history.ts`, supprimé) — résumait la fenêtre glissante au-delà de 20 messages via Haiku (spec 4.6). La lecture d'un résumé déjà existant (`getConversationSummary()`) reste en place.
+
+Conservés (déclenchés explicitement par une action d'Axel, pas par un timer ni un effet de bord silencieux) : la boucle de chat interactive (`chat.ts`, un envoi de message = un appel), et le parsing du profil en texte libre (`coreFactsParser.ts`, déclenché par le bouton « Enregistrer » de l'écran profil).
+
+**Effet sur la mémoire continue (4.8) et l'historique (4.6)** : la mémoire `core` (onboarding, édition manuelle) n'est pas affectée. La mémoire `peripheral` n'est plus alimentée automatiquement — reste lisible si des faits existent déjà, mais aucun nouveau fait n'est plus extrait sans mécanisme explicite (non demandé pour l'instant). L'historique glissant continue de fonctionner (20 derniers messages, spec 4.6) ; au-delà, les messages plus anciens sortent simplement de la fenêtre sans résumé de remplacement — accepté comme compromis, pas de solution de repli demandée.

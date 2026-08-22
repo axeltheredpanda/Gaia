@@ -9,7 +9,6 @@ import { registerAuthIpc } from './ipc/auth'
 import { registerHudIpc } from './ipc/hud'
 import { registerMemoryIpc } from './ipc/memory'
 import { registerSettingsIpc } from './ipc/settings'
-import { startHudBadgeRefreshLoop } from './claude/hudBadge'
 import { registerHudStateWindow } from './hud/hudState'
 
 function createWindow(): void {
@@ -37,6 +36,15 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  // Un lien markdown dans une réponse (spec 8.9) navigue la fenêtre par défaut sans ce garde —
+  // on la fait rester sur l'appli et on ouvre le lien dans le navigateur système à la place.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (new URL(url).origin !== new URL(mainWindow.webContents.getURL()).origin) {
+      event.preventDefault()
+      shell.openExternal(url)
+    }
+  })
+
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
@@ -50,7 +58,6 @@ app.whenReady().then(() => {
   registerHudIpc()
   registerMemoryIpc()
   registerSettingsIpc()
-  startHudBadgeRefreshLoop()
   createWindow()
 
   app.on('activate', () => {

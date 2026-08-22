@@ -1,11 +1,12 @@
 import Parser from 'rss-parser'
 import { getRssFeedOverride } from '../supabase/settings'
 
-// Défauts : tech, finance, actu générale (spec 8.1) — remplaçables via l'écran paramètres (spec 8.8).
+// Défauts : générale, finance, tech (spec 8.1/8.9) — sources fixées explicitement après un premier
+// test ayant remonté un article hors-sujet ; remplaçables via l'écran paramètres (spec 8.8).
 const DEFAULT_FEEDS = [
-  'https://hnrss.org/frontpage', // tech
-  'https://www.lesechos.fr/rss/rss_une.xml', // finance
-  'https://www.lemonde.fr/rss/une.xml' // actu générale
+  'https://www.lemonde.fr/rss/une.xml', // actu générale
+  'https://services.lesechos.fr/rss/les-echos-finance-marches.xml', // finance
+  'https://techcrunch.com/feed/' // tech
 ]
 
 const parser = new Parser()

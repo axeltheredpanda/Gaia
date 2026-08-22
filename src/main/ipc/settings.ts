@@ -5,6 +5,7 @@ import {
   setRssFeeds,
   setWeatherCityOverride
 } from '../supabase/settings'
+import { getTodayCostUsd } from '../supabase/apiUsage'
 
 export function registerSettingsIpc(): void {
   ipcMain.handle('settings:getRssFeeds', async () => getRssFeedOverride())
@@ -16,4 +17,5 @@ export function registerSettingsIpc(): void {
     await setWeatherCityOverride(city)
   })
   ipcMain.handle('settings:getAppVersion', () => app.getVersion())
+  ipcMain.handle('settings:getTodayCostUsd', async () => getTodayCostUsd())
 }

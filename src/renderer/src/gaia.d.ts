@@ -45,6 +45,7 @@ declare global {
         getWeatherCity: () => Promise<string | null>
         setWeatherCity: (city: string | null) => Promise<void>
         getAppVersion: () => Promise<string>
+        getTodayCostUsd: () => Promise<number | null>
       }
     }
   }

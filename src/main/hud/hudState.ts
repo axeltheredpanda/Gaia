@@ -12,3 +12,8 @@ export function registerHudStateWindow(window: BrowserWindow): void {
 export function emitHudState(state: HudState, detail?: string): void {
   win?.webContents.send('hud:state', { state, detail })
 }
+
+/** Maîtrise des coûts (spec 8.10) : le job de badge HUD en tâche de fond ne doit tourner que fenêtre ouverte + au premier plan. */
+export function isMainWindowFocused(): boolean {
+  return win !== null && !win.isDestroyed() && win.isFocused()
+}

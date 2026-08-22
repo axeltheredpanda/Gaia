@@ -3,8 +3,7 @@ import { SYSTEM_PROMPT } from './systemPrompt'
 import { getCurrentDateTimeLine } from './datetime'
 import { routeModel } from './router'
 import { runToolLoop } from './toolLoop'
-import { extractMemoryFacts } from './memoryExtraction'
-import { appendMessage, loadRecentHistory, getConversationSummary, maybeSummarize } from '../supabase/history'
+import { appendMessage, loadRecentHistory, getConversationSummary } from '../supabase/history'
 import { getCoreFactsBlock, getPeripheralFactsBlock } from '../supabase/memory'
 import { buildUserContent, type Attachment } from './attachments'
 import { extractPageForUrl } from '../tools/webPage'
@@ -29,7 +28,9 @@ export async function sendChat(userText: string, attachments?: Attachment[]): Pr
   const cachedText = coreBlock ? `${SYSTEM_PROMPT}\n\nFaits durables sur Axel :\n${coreBlock}` : SYSTEM_PROMPT
 
   const system: Anthropic.Beta.BetaTextBlockParam[] = [
-    { type: 'text', text: cachedText, cache_control: { type: 'ephemeral' } },
+    // TTL 1h (spec 8.10) plutôt que le défaut 5 min : usage réel intermittent dans la journée,
+    // l'écart entre deux échanges dépasse souvent 5 min mais reste probablement sous 1h.
+    { type: 'text', text: cachedText, cache_control: { type: 'ephemeral', ttl: '1h' } },
     // jamais cache_control ici : doit être fraîche à chaque requête
     { type: 'text', text: getCurrentDateTimeLine() }
   ]
@@ -61,10 +62,6 @@ export async function sendChat(userText: string, attachments?: Attachment[]): Pr
   for (const message of newMessages) {
     await appendMessage(message.role as 'user' | 'assistant', message.content)
   }
-  await maybeSummarize().catch((error: unknown) => console.error('Résumé de conversation échoué', error))
-  await extractMemoryFacts(userText, text).catch((error: unknown) =>
-    console.error('Extraction mémoire échouée', error)
-  )
 
   return { text, model, taskActions, imageDataUri }
 }

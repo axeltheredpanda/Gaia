@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { extractRawText } from 'mammoth'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { Attachment } from './gaia.d'
 
 type Message = { role: 'user' | 'assistant'; text: string; model?: string; imageDataUri?: string | null }
@@ -48,19 +50,28 @@ function Clock(): React.JSX.Element {
   return <span className="value">{time}</span>
 }
 
-const STATE_INTENSITY: Record<string, number> = { idle: 1, listening: 1.15, thinking: 1.8, responding: 1.3 }
+// Référence de taille (px) à laquelle la densité du réseau (nombre de nœuds, distance de
+// connexion) a été calibrée visuellement — mise à l'échelle proportionnelle en dessous (bandeau
+// mini, spec 8.9) pour éviter un amas dense illisible dans un petit espace.
+const REFERENCE_SIZE = 620
+const REFERENCE_NODE_COUNT = 70
+const REFERENCE_CONNECT_DIST = 70
 
 /**
- * Réseau de particules animé — port du mockup HUD (canvas 2D, requestAnimationFrame),
- * dont la vitesse/pulsation varie avec l'état HUD (spec 8.2) sans redémarrer la simulation :
- * un ref lu à chaque frame, pas un effet qui réinitialise les nœuds à chaque changement d'état.
+ * Réseau de particules animé — port du mockup HUD (canvas 2D, requestAnimationFrame). Le
+ * comportement diffère explicitement par état (spec 8.2) plutôt qu'un simple facteur d'intensité :
+ * idle = dérive lente tamisée, listening = resserrement + pulsation rapide + accent plus vif,
+ * thinking = points voyageant le long de spokes vers le centre (flux de données, pas un pulse
+ * statique), responding = cœur central figé (sans pulsation) tant que la réponse s'écrit.
+ * État lu via un ref à chaque frame, jamais via une dépendance d'effet — la simulation ne
+ * redémarre jamais à un changement d'état.
  */
 function NetworkCanvas({ hudState }: { hudState: string }): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const intensityRef = useRef(1)
+  const stateRef = useRef(hudState)
 
   useEffect(() => {
-    intensityRef.current = STATE_INTENSITY[hudState] ?? 1
+    stateRef.current = hudState
   }, [hudState])
 
   useEffect(() => {
@@ -70,6 +81,8 @@ function NetworkCanvas({ hudState }: { hudState: string }): React.JSX.Element {
 
     let w = 0
     let h = 0
+    let nodeCount = REFERENCE_NODE_COUNT
+    let connectDist = REFERENCE_CONNECT_DIST
     let nodes: { x: number; y: number; vx: number; vy: number; phase: number }[] = []
     const accent = '45,232,176'
     let frameId = 0
@@ -78,13 +91,16 @@ function NetworkCanvas({ hudState }: { hudState: string }): React.JSX.Element {
       const rect = canvas!.parentElement!.getBoundingClientRect()
       w = canvas!.width = rect.width
       h = canvas!.height = rect.height
+      const scale = Math.min(w, h) / REFERENCE_SIZE
+      nodeCount = Math.max(10, Math.round(REFERENCE_NODE_COUNT * scale))
+      connectDist = Math.max(18, REFERENCE_CONNECT_DIST * scale)
     }
 
     function initNodes(): void {
       nodes = []
       const cx = w / 2
       const cy = h / 2
-      for (let i = 0; i < 70; i++) {
+      for (let i = 0; i < nodeCount; i++) {
         const angle = Math.random() * Math.PI * 2
         const radius = Math.pow(Math.random(), 0.6) * Math.min(w, h) * 0.32
         nodes.push({
@@ -101,51 +117,81 @@ function NetworkCanvas({ hudState }: { hudState: string }): React.JSX.Element {
       ctx!.clearRect(0, 0, w, h)
       const cx = w / 2
       const cy = h / 2
-      const intensity = intensityRef.current
+      const state = stateRef.current
+      const maxR = Math.min(w, h) * 0.34
+      const isListening = state === 'listening'
+      const isThinking = state === 'thinking'
+      const isIdle = state === 'idle'
 
+      // Mouvement : resserrement vers le centre en listening, dérive tamisée en idle.
+      const speedMul = isListening ? 1.6 : isIdle ? 0.6 : 1
+      const boundary = isListening ? maxR * 0.55 : maxR
       for (const n of nodes) {
-        n.x += n.vx * intensity
-        n.y += n.vy * intensity
+        n.x += n.vx * speedMul
+        n.y += n.vy * speedMul
         const d = Math.hypot(n.x - cx, n.y - cy)
-        const maxR = Math.min(w, h) * 0.34
-        if (d > maxR) {
+        if (d > boundary) {
           n.vx -= (n.x - cx) * 0.0006
           n.vy -= (n.y - cy) * 0.0006
         }
       }
 
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const a = nodes[i]
-          const b = nodes[j]
-          const dist = Math.hypot(a.x - b.x, a.y - b.y)
-          if (dist < 70) {
-            const op = (1 - dist / 70) * 0.35
-            ctx!.strokeStyle = `rgba(${accent},${op})`
-            ctx!.lineWidth = 0.6
-            ctx!.beginPath()
-            ctx!.moveTo(a.x, a.y)
-            ctx!.lineTo(b.x, b.y)
-            ctx!.stroke()
+      if (isThinking) {
+        // Flux de données : des points voyagent le long de spokes vers le centre, pas de pulse statique.
+        for (const n of nodes) {
+          ctx!.strokeStyle = `rgba(${accent},0.1)`
+          ctx!.lineWidth = 0.5
+          ctx!.beginPath()
+          ctx!.moveTo(n.x, n.y)
+          ctx!.lineTo(cx, cy)
+          ctx!.stroke()
+
+          const travel = ((t * 0.0008 + n.phase) % (Math.PI * 2)) / (Math.PI * 2)
+          const px = n.x + (cx - n.x) * travel
+          const py = n.y + (cy - n.y) * travel
+          ctx!.fillStyle = `rgba(${accent},0.9)`
+          ctx!.beginPath()
+          ctx!.arc(px, py, 1.8, 0, Math.PI * 2)
+          ctx!.fill()
+        }
+      } else {
+        const opacity = isIdle ? 0.55 : isListening ? 1 : 0.8
+        for (let i = 0; i < nodes.length; i++) {
+          for (let j = i + 1; j < nodes.length; j++) {
+            const a = nodes[i]
+            const b = nodes[j]
+            const dist = Math.hypot(a.x - b.x, a.y - b.y)
+            if (dist < connectDist) {
+              const op = (1 - dist / connectDist) * 0.35 * opacity
+              ctx!.strokeStyle = `rgba(${accent},${op})`
+              ctx!.lineWidth = 0.6
+              ctx!.beginPath()
+              ctx!.moveTo(a.x, a.y)
+              ctx!.lineTo(b.x, b.y)
+              ctx!.stroke()
+            }
           }
+        }
+
+        const pulseSpeed = isListening ? 0.003 : 0.0015
+        for (const n of nodes) {
+          const pulse = 0.5 + 0.5 * Math.sin(t * pulseSpeed + n.phase)
+          ctx!.fillStyle = `rgba(${accent},${(0.4 + pulse * 0.5) * opacity})`
+          ctx!.beginPath()
+          ctx!.arc(n.x, n.y, 1.4, 0, Math.PI * 2)
+          ctx!.fill()
         }
       }
 
-      for (const n of nodes) {
-        const pulse = 0.5 + 0.5 * Math.sin(t * 0.0015 * intensity + n.phase)
-        ctx!.fillStyle = `rgba(${accent},${0.4 + pulse * 0.5})`
-        ctx!.beginPath()
-        ctx!.arc(n.x, n.y, 1.4, 0, Math.PI * 2)
-        ctx!.fill()
-      }
-
-      const corePulse = 0.6 + 0.4 * Math.sin(t * 0.002 * intensity)
-      const grad = ctx!.createRadialGradient(cx, cy, 0, cx, cy, 40)
+      // Cœur central : figé (sans pulsation) tant que la réponse s'écrit, sinon pulse doux.
+      const coreRadius = maxR * 0.24
+      const corePulse = state === 'responding' ? 1 : 0.6 + 0.4 * Math.sin(t * 0.002)
+      const grad = ctx!.createRadialGradient(cx, cy, 0, cx, cy, coreRadius)
       grad.addColorStop(0, `rgba(${accent},${0.25 * corePulse})`)
       grad.addColorStop(1, `rgba(${accent},0)`)
       ctx!.fillStyle = grad
       ctx!.beginPath()
-      ctx!.arc(cx, cy, 40, 0, Math.PI * 2)
+      ctx!.arc(cx, cy, coreRadius, 0, Math.PI * 2)
       ctx!.fill()
 
       frameId = requestAnimationFrame(step)
@@ -167,6 +213,33 @@ function NetworkCanvas({ hudState }: { hudState: string }): React.JSX.Element {
   }, [])
 
   return <canvas ref={canvasRef} />
+}
+
+/** Panneau de conversation (spec 8.9) — rendu markdown côté Gaia, historique complet scrollable. */
+function ChatPanel({ messages }: { messages: Message[] }): React.JSX.Element {
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: 'end' })
+  }, [messages])
+
+  return (
+    <div className="chat-panel">
+      {messages.map((m, i) => (
+        <div key={i} className={`msg msg-${m.role}`}>
+          <div className="msg-bubble">
+            {m.role === 'assistant' ? (
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
+            ) : (
+              <p>{m.text}</p>
+            )}
+            {m.imageDataUri && <img src={m.imageDataUri} alt="" className="reply-image" />}
+          </div>
+        </div>
+      ))}
+      <div ref={bottomRef} />
+    </div>
+  )
 }
 
 function Toasts({ toasts }: { toasts: Toast[] }): React.JSX.Element {
@@ -232,6 +305,7 @@ function ProfileScreen({
   const [rssFeedsText, setRssFeedsText] = useState('')
   const [weatherCity, setWeatherCity] = useState('')
   const [appVersion, setAppVersion] = useState('')
+  const [todayCostUsd, setTodayCostUsd] = useState<number | null>(null)
   const [settingsSaved, setSettingsSaved] = useState(false)
 
   async function refresh(): Promise<void> {
@@ -239,13 +313,14 @@ function ProfileScreen({
   }
 
   async function refreshSettings(): Promise<void> {
-    const [linear, googleTasks, googleCalendar, rssFeeds, city, version] = await Promise.all([
+    const [linear, googleTasks, googleCalendar, rssFeeds, city, version, cost] = await Promise.all([
       window.gaia.auth.linear.status(),
       window.gaia.auth.googleTasks.status(),
       window.gaia.auth.googleCalendar.status(),
       window.gaia.settings.getRssFeeds(),
       window.gaia.settings.getWeatherCity(),
-      window.gaia.settings.getAppVersion()
+      window.gaia.settings.getAppVersion(),
+      window.gaia.settings.getTodayCostUsd()
     ])
     setLinearConnected(linear)
     setGoogleTasksConnected(googleTasks)
@@ -253,6 +328,7 @@ function ProfileScreen({
     setRssFeedsText((rssFeeds ?? []).join('\n'))
     setWeatherCity(city ?? '')
     setAppVersion(version)
+    setTodayCostUsd(cost)
   }
 
   useEffect(() => {
@@ -399,6 +475,7 @@ function ProfileScreen({
 
             <h2>À PROPOS</h2>
             <p>Gaia {appVersion && `v${appVersion}`}</p>
+            <p>Coût API aujourd&apos;hui : {todayCostUsd !== null ? `$${todayCostUsd.toFixed(3)}` : '--'}</p>
           </>
         )}
 
@@ -525,7 +602,6 @@ export default function App(): React.JSX.Element {
     }
   }
 
-  const lastReply = [...messages].reverse().find((m) => m.role === 'assistant')
   const stateLabel =
     hudState.state === 'thinking'
       ? (hudState.detail ?? 'réflexion...')
@@ -613,19 +689,25 @@ export default function App(): React.JSX.Element {
         </div>
 
         <div className="main" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
-          <div className="stage">
-            <NetworkCanvas hudState={hudState.state} />
-            <div className="core-label">
-              <div className="name">GAIA</div>
-              <div className="state">{stateLabel}</div>
+          {messages.length === 0 ? (
+            <div className="stage">
+              <NetworkCanvas hudState={hudState.state} />
+              <div className="core-label">
+                <div className="name">GAIA</div>
+                <div className="state">{stateLabel}</div>
+              </div>
             </div>
-          </div>
-
-          {lastReply && (
-            <div className="last-reply">
-              {lastReply.text}
-              {lastReply.imageDataUri && <img src={lastReply.imageDataUri} alt="" className="reply-image" />}
-            </div>
+          ) : (
+            <>
+              <div className="stage-mini">
+                <NetworkCanvas hudState={hudState.state} />
+                <div className="core-label">
+                  <div className="name">GAIA</div>
+                  <div className="state">{stateLabel}</div>
+                </div>
+              </div>
+              <ChatPanel messages={messages} />
+            </>
           )}
 
           {pendingAttachments.length > 0 && (

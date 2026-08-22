@@ -8,6 +8,7 @@ import { getWeather } from '../tools/weather'
 import { getNews } from '../tools/news'
 import { captureScreenshot } from '../tools/screenshot'
 import { emitHudState } from '../hud/hudState'
+import { logApiUsage } from '../supabase/apiUsage'
 
 const MAX_TOOL_ITERATIONS = 5
 
@@ -61,6 +62,8 @@ export interface ToolLoopOptions {
   includeBriefingTools?: boolean
   /** Jamais activé pour le job de badge HUD en tâche de fond — capture strictement à la demande (spec 8.7). */
   includeScreenshotTool?: boolean
+  /** Étiquette du log de coût API (spec 8.10) — 'chat' par défaut. */
+  usageLabel?: string
   /** Uniquement pour un appel déclenché par l'utilisateur — le rafraîchissement du badge HUD en tâche de fond ne doit jamais faire clignoter l'état "thinking" à l'insu de l'utilisateur. */
   emitHudEvents?: boolean
 }
@@ -156,6 +159,7 @@ export async function runToolLoop(
       mcp_servers: mcpServers,
       messages: working
     })
+    void logApiUsage(options.usageLabel ?? 'chat', options.model, response.usage)
 
     working.push({ role: 'assistant', content: response.content })
 

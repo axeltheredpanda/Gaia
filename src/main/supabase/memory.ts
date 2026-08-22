@@ -92,32 +92,6 @@ export async function getPeripheralFactsBlock(queryText: string): Promise<string
   return formatFactsBlock(await getPeripheralFactsForQuery(queryText))
 }
 
-/**
- * Extraction automatique uniquement — tier codé en dur à 'peripheral', jamais paramétrable,
- * pour qu'il soit structurellement impossible à ce chemin d'écrire ou modifier un fait core.
- */
-export async function upsertPeripheralFact(fact: {
-  id?: number
-  category: string | null
-  content: string
-}): Promise<void> {
-  if (!isSupabaseConfigured()) return
-  const supabase = getSupabaseClient()
-  if (fact.id) {
-    const { error } = await supabase
-      .from('memory_facts')
-      .update({ category: fact.category, content: fact.content, updated_at: new Date().toISOString() })
-      .eq('id', fact.id)
-      .eq('tier', 'peripheral')
-    if (error) throw new Error(error.message)
-  } else {
-    const { error } = await supabase
-      .from('memory_facts')
-      .insert({ category: fact.category, content: fact.content, tier: 'peripheral' })
-    if (error) throw new Error(error.message)
-  }
-}
-
 /** Onboarding + édition manuelle du profil uniquement — tier codé en dur à 'core'. */
 export async function upsertCoreFact(fact: {
   id?: number

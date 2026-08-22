@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('gaia', {
     setRssFeeds: (feeds: string[]): Promise<void> => ipcRenderer.invoke('settings:setRssFeeds', feeds),
     getWeatherCity: (): Promise<string | null> => ipcRenderer.invoke('settings:getWeatherCity'),
     setWeatherCity: (city: string | null): Promise<void> => ipcRenderer.invoke('settings:setWeatherCity', city),
-    getAppVersion: (): Promise<string> => ipcRenderer.invoke('settings:getAppVersion')
+    getAppVersion: (): Promise<string> => ipcRenderer.invoke('settings:getAppVersion'),
+    getTodayCostUsd: (): Promise<number | null> => ipcRenderer.invoke('settings:getTodayCostUsd')
   }
 })
