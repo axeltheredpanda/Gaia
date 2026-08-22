@@ -1,4 +1,18 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
+
+function resolvePythonCommand(): string {
+  for (const candidate of ['python3', 'python']) {
+    try {
+      execFileSync('where.exe', [candidate], { encoding: 'utf8' })
+      return candidate
+    } catch {
+      // try next
+    }
+  }
+  return 'python3'
+}
+
+const PYTHON = resolvePythonCommand()
 
 // Port local fixe, jamais exposé hors localhost — même esprit que le proxy PostgREST utilisé en
 // test pour ce projet : un service local piloté par Gaia, pas un service réseau public.
@@ -20,7 +34,7 @@ let readyPromise: Promise<void> | null = null
 function ensureServerStarted(voiceName: string): Promise<void> {
   if (readyPromise) return readyPromise
   readyPromise = new Promise((resolve, reject) => {
-    const proc = spawn('python3', ['-m', 'piper.http_server', '-m', voiceName, '--host', HOST, '--port', String(PORT)])
+    const proc = spawn(PYTHON, ['-m', 'piper.http_server', '-m', voiceName, '--host', HOST, '--port', String(PORT)])
     serverProcess = proc
     let settled = false
 

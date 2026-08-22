@@ -21,6 +21,16 @@ contextBridge.exposeInMainWorld('gaia', {
       const listener = (_event: Electron.IpcRendererEvent, wav: ArrayBuffer): void => callback(wav)
       ipcRenderer.on('chat:ttsAudio', listener)
       return () => ipcRenderer.removeListener('chat:ttsAudio', listener)
+    },
+    onTtsError: (callback: (message: string) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, message: string): void => callback(message)
+      ipcRenderer.on('chat:ttsError', listener)
+      return () => ipcRenderer.removeListener('chat:ttsError', listener)
+    },
+    onOllamaUnavailable: (callback: () => void): (() => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on('ollama:unavailable', listener)
+      return () => ipcRenderer.removeListener('ollama:unavailable', listener)
     }
   },
   auth: {

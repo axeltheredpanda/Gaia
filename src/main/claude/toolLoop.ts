@@ -125,8 +125,8 @@ function imageBlockFromDataUri(dataUri: string): Anthropic.Beta.BetaImageBlockPa
 /**
  * Boucle d'appel d'outils partagée par le chat et le rafraîchissement du badge HUD :
  * appelle l'API, exécute les tool_use côté client (Google Tasks, recherche d'image) et boucle
- * jusqu'à une réponse finale. Linear passe par mcp_servers (exécuté côté serveur Anthropic) —
- * ses appels d'outils apparaissent en blocs `mcp_tool_use` déjà résolus.
+ * jusqu'à une réponse finale. Linear passe par mcp_servers + mcp_toolset (exécuté côté
+ * serveur Anthropic) — ses appels d'outils apparaissent en blocs `mcp_tool_use` déjà résolus.
  */
 export async function runToolLoop(
   messages: Anthropic.Beta.BetaMessageParam[],
@@ -138,7 +138,16 @@ export async function runToolLoop(
   )
   const googleTasksTools = await getGoogleTasksTools().catch(() => [])
 
-  const tools: Anthropic.Beta.BetaToolUnion[] = [...googleTasksTools]
+  // Chaque serveur dans mcp_servers doit être référencé par un mcp_toolset (beta mcp-client-2025-11-20).
+  const mcpToolsets = mcpServers.map((server) => ({
+    type: 'mcp_toolset' as const,
+    mcp_server_name: server.name
+  }))
+
+  const tools: Anthropic.Beta.BetaToolUnion[] = [
+    ...googleTasksTools,
+    ...(mcpToolsets as Anthropic.Beta.BetaToolUnion[])
+  ]
   if (options.includeWebSearch) tools.push({ type: 'web_search_20250305' as const, name: 'web_search' as const })
   if (options.includeImageSearch) tools.push(SEARCH_IMAGE_TOOL)
   if (options.includeBriefingTools) tools.push(GET_WEATHER_TOOL, GET_NEWS_TOOL)

@@ -26,6 +26,10 @@ const MODEL = 'base'
  * (vérifié directement dans le code source de whisper.cpp, cli.cpp::output_txt).
  */
 export async function transcribeAudio(rawAudio: Buffer): Promise<string> {
+  if (rawAudio.length < 2000) {
+    throw new Error('Enregistrement trop court — maintiens le micro au moins 1 seconde.')
+  }
+
   const id = randomUUID()
   const rawPath = join(tmpdir(), `gaia-ptt-${id}.webm`)
   const wavPath = join(tmpdir(), `gaia-ptt-${id}.wav`)
@@ -42,11 +46,21 @@ export async function transcribeAudio(rawAudio: Buffer): Promise<string> {
       whisperOptions: { outputInText: true, language: 'fr' }
     })
     const text = await readFile(txtPath, 'utf-8')
-    return text
+    const cleaned = text
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
       .join(' ')
+    if (!cleaned) {
+      throw new Error('Aucune parole détectée — parle plus fort ou maintiens le micro un peu plus longtemps.')
+    }
+    return cleaned
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (/too short|produced no output|Transcription failed/i.test(message)) {
+      throw new Error('Enregistrement trop court ou inaudible — maintiens le micro 1–2 secondes en parlant.')
+    }
+    throw error
   } finally {
     await unlink(rawPath).catch(() => {})
     await unlink(wavPath).catch(() => {})

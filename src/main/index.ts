@@ -1,5 +1,20 @@
+import { execSync } from 'node:child_process'
 import { config } from 'dotenv'
 config()
+
+/** Electron hérite souvent d'un PATH figé au lancement — recharger Machine+User pour ffmpeg/python winget. */
+if (process.platform === 'win32') {
+  try {
+    const path = execSync(
+      'powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable(\'Path\',\'Machine\') + \';\' + [Environment]::GetEnvironmentVariable(\'Path\',\'User\')"',
+      { encoding: 'utf8' }
+    ).trim()
+    process.env.Path = path
+    process.env.PATH = path
+  } catch {
+    // winget/ffmpeg absents : on garde le PATH hérité
+  }
+}
 
 import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'node:path'
@@ -12,6 +27,11 @@ import { registerSettingsIpc } from './ipc/settings'
 import { registerVoiceIpc } from './ipc/voice'
 import { registerHudStateWindow } from './hud/hudState'
 import { startPushToTalkListener } from './voice/ptt'
+import { initOllama } from './ollama/client'
+
+// TTS Piper arrive après l'appel API (plusieurs secondes après le clic micro) — sans ça,
+// Chromium bloque audio.play() faute de geste utilisateur récent.
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -55,7 +75,7 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   registerChatIpc()
   registerAuthIpc()
   registerHudIpc()
@@ -63,6 +83,11 @@ app.whenReady().then(() => {
   registerSettingsIpc()
   registerVoiceIpc()
   createWindow()
+
+  const ollamaOk = await initOllama()
+  if (!ollamaOk) {
+    BrowserWindow.getAllWindows()[0]?.webContents.send('ollama:unavailable')
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

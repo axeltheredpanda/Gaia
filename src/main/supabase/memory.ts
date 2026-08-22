@@ -82,6 +82,7 @@ export async function getPeripheralFactsForQuery(
   if (error) throw new Error(error.message)
 
   const matches = (data ?? []).filter((fact) => {
+    if (fact.category === 'style_interaction') return false
     const haystack = normalize(`${fact.category ?? ''} ${fact.content}`)
     return keywords.some((word) => haystack.includes(word))
   })
@@ -90,6 +91,59 @@ export async function getPeripheralFactsForQuery(
 
 export async function getPeripheralFactsBlock(queryText: string): Promise<string | null> {
   return formatFactsBlock(await getPeripheralFactsForQuery(queryText))
+}
+
+/** style_interaction : injecté intégralement à chaque requête (pas de matching par mots-clés). */
+export async function getStyleInteractionFacts(): Promise<MemoryFact[]> {
+  if (!isSupabaseConfigured()) return []
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from('memory_facts')
+    .select('id, category, content')
+    .eq('tier', 'peripheral')
+    .eq('category', 'style_interaction')
+    .order('id', { ascending: true })
+  if (error) throw new Error(error.message)
+  return data ?? []
+}
+
+export async function getStyleInteractionFactsBlock(): Promise<string | null> {
+  return formatFactsBlock(await getStyleInteractionFacts())
+}
+
+export async function listPeripheralFactsForExtraction(): Promise<MemoryFact[]> {
+  if (!isSupabaseConfigured()) return []
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from('memory_facts')
+    .select('id, category, content')
+    .eq('tier', 'peripheral')
+    .order('id', { ascending: true })
+  if (error) throw new Error(error.message)
+  return data ?? []
+}
+
+/** Extraction automatique uniquement — tier codé en dur à 'peripheral', garde-fou sur les updates. */
+export async function upsertPeripheralFact(fact: {
+  id?: number
+  category: string | null
+  content: string
+}): Promise<void> {
+  if (!isSupabaseConfigured()) return
+  const supabase = getSupabaseClient()
+  if (fact.id) {
+    const { error } = await supabase
+      .from('memory_facts')
+      .update({ category: fact.category, content: fact.content, updated_at: new Date().toISOString() })
+      .eq('id', fact.id)
+      .eq('tier', 'peripheral')
+    if (error) throw new Error(error.message)
+  } else {
+    const { error } = await supabase
+      .from('memory_facts')
+      .insert({ category: fact.category, content: fact.content, tier: 'peripheral' })
+    if (error) throw new Error(error.message)
+  }
 }
 
 /** Onboarding + édition manuelle du profil uniquement — tier codé en dur à 'core'. */

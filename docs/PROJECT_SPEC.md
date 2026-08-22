@@ -82,13 +82,16 @@ Le contexte todo (Linear, Google Tasks) est du temps réel récupéré à la dem
 
 - `id`, `category` (texte libre : travail, habitudes, personnes, préférences, projets…), `tier` (`core` | `peripheral`), `content`, `created_at`, `updated_at`.
 
-**Écriture (extraction continue) — supprimée (8.11)** : après chaque échange, un call Haiku relisait l'échange et décidait s'il y avait un fait `peripheral` durable à ajouter ou mettre à jour (upsert sur un fait proche existant, sortie forcée via tool use, jamais que du tier `peripheral` par construction de la requête). Retirée avec les autres appels API automatiques (Axel : trop coûteux en tokens sans qu'il l'ait demandé) — plus aucun nouveau fait `peripheral` n'est extrait automatiquement.
+**Écriture (extraction continue) — partiellement réactivée** : après chaque échange, un call Haiku relit l'échange et décide s'il y a un fait `peripheral` durable à ajouter ou mettre à jour (`src/main/claude/memoryExtraction.ts`, réintroduit pour capturer aussi les préférences d'interaction). Upsert sur un fait proche existant, sortie forcée via tool use, jamais que du tier `peripheral` par construction de la requête (garde-fou `.eq('tier', 'peripheral')` sur les updates).
 
-**Lecture (deux niveaux)** :
+**Catégorie `style_interaction`** : faits peripheral décrivant comment Axel veut que Gaia lui parle (réponses courtes, ton direct, éviter les questions en rafale…). Même table, même tier `peripheral`. Lecture **exceptionnelle** : injectés intégralement et systématiquement dans le system prompt à chaque requête (comme les faits `core`), pas par matching mots-clés — une préférence d'interaction n'a pas de sujet auquel se rattacher.
+
+**Lecture (deux niveaux + style_interaction)** :
 - `core` : injecté intégralement et systématiquement dans le bloc caché du system prompt (voir 4.6), jamais filtré, jamais omis.
-- `peripheral` : toujours lu (SELECT Supabase, gratuit) par mots-clés simples selon le sujet de la requête en cours si des faits existent déjà — mais plus jamais alimenté automatiquement depuis 8.11.
+- `style_interaction` (peripheral) : injecté intégralement hors bloc caché, à chaque requête.
+- autres `peripheral` : lus par mots-clés simples selon le sujet de la requête en cours.
 
-**Règle des tiers (stricte)** : `core` vient exclusivement de l'onboarding et des éditions manuelles du profil ; `peripheral` ne vient plus que de faits déjà en base avant 8.11 (plus de source d'écriture active). Pas de promotion automatique `peripheral` → `core` pour cette V1.
+**Règle des tiers (stricte)** : `core` vient exclusivement de l'onboarding et des éditions manuelles du profil ; `peripheral` vient de l'extraction automatique après échange et des faits déjà en base. Pas de promotion automatique `peripheral` → `core` pour cette V1.
 
 ### 4.9 Onboarding et profil
 
@@ -201,12 +204,12 @@ Déviation demandée en cours de session, par-dessus 8.10 : au-delà de limiter 
 
 Supprimés :
 - **Job de badge HUD** (`src/main/claude/hudBadge.ts`, supprimé) — rafraîchissait `hud_cache` toutes les 12 minutes. Le badge « tâches aujourd'hui » de la statusbar affiche désormais la dernière valeur en cache s'il y en a une (lecture Supabase seule, gratuite), sans plus jamais se rafraîchir tout seul.
-- **Extraction mémoire automatique** (`src/main/claude/memoryExtraction.ts`, supprimé) — un call Haiku après chaque échange pour détecter des faits `peripheral` à mémoriser (spec 4.8). `upsertPeripheralFact` (écriture) retiré de `supabase/memory.ts` avec elle ; la lecture (`getPeripheralFactsForQuery`/`getPeripheralFactsBlock`) reste, elle ne coûte rien (SELECT Supabase).
+- **Extraction mémoire automatique** — supprimée initialement avec 8.11, **réactivée ensuite** (`src/main/claude/memoryExtraction.ts`) pour alimenter les faits `peripheral` incluant `style_interaction` (voir 4.8). Effet de bord d'un envoi de message explicite, pas d'un timer.
 - **Résumé de conversation automatique** (`maybeSummarize()` dans `supabase/history.ts`, supprimé) — résumait la fenêtre glissante au-delà de 20 messages via Haiku (spec 4.6). La lecture d'un résumé déjà existant (`getConversationSummary()`) reste en place.
 
 Conservés (déclenchés explicitement par une action d'Axel, pas par un timer ni un effet de bord silencieux) : la boucle de chat interactive (`chat.ts`, un envoi de message = un appel), et le parsing du profil en texte libre (`coreFactsParser.ts`, déclenché par le bouton « Enregistrer » de l'écran profil).
 
-**Effet sur la mémoire continue (4.8) et l'historique (4.6)** : la mémoire `core` (onboarding, édition manuelle) n'est pas affectée. La mémoire `peripheral` n'est plus alimentée automatiquement — reste lisible si des faits existent déjà, mais aucun nouveau fait n'est plus extrait sans mécanisme explicite (non demandé pour l'instant). L'historique glissant continue de fonctionner (20 derniers messages, spec 4.6) ; au-delà, les messages plus anciens sortent simplement de la fenêtre sans résumé de remplacement — accepté comme compromis, pas de solution de repli demandée.
+**Effet sur la mémoire continue (4.8) et l'historique (4.6)** : la mémoire `core` (onboarding, édition manuelle) n'est pas affectée. La mémoire `peripheral` est de nouveau alimentée après chaque échange (extraction Haiku), avec injection systématique des faits `style_interaction`. L'historique glissant continue de fonctionner (20 derniers messages, spec 4.6) ; au-delà, les messages plus anciens sortent simplement de la fenêtre sans résumé de remplacement — accepté comme compromis, pas de solution de repli demandée.
 
 ## 9. V2 vocal
 
@@ -269,3 +272,21 @@ Non vérifié (réseau bloqué vers Hugging Face et les releases GitHub dans ce 
 - Téléchargement réel d'un modèle whisper.cpp ou d'une voix Piper, et donc la précision/latence réelle de la transcription et la qualité audio de la synthèse.
 - Lecture audio réelle de bout en bout (dépend d'un device audio fonctionnel, absent de ce sandbox).
 - Fonctionnement du raccourci global sur un vrai événement clavier OS (uiohook lui-même vérifié isolément, mais pas via une frappe physique simulée à ce niveau).
+
+## 10. IA locale (Ollama)
+
+**Prérequis** : Ollama tourne en local (`localhost:11434`). Vérification au démarrage (`src/main/ollama/client.ts` → `initOllama()`) ; toast HUD si absent. Les deux features ci-dessous se dégradent proprement sans Ollama — pas de crash.
+
+**Pas de tool calling** sur les chemins Ollama : entrée/sortie texte pur uniquement.
+
+Modèles par défaut (surchargeables via env) : `OLLAMA_FILLER_MODEL=llama3.2:3b`, `OLLAMA_LOCAL_MODEL=llama3.1:8b`, `OLLAMA_BASE_URL=http://127.0.0.1:11434`.
+
+### 10.1 Filler vocal
+
+En mode voix, pendant un appel cloud Haiku/Sonnet (latence perceptible, tools possibles), Gaia génère une courte phrase d'accroche via le modèle local rapide et la joue immédiatement en TTS Piper (`src/main/ollama/filler.ts`, déclenché depuis `ipc/chat.ts` en parallèle de `sendChat`). Variantes courtes ; repli sur des phrases fixes si Ollama est absent ou trop lent.
+
+### 10.2 Troisième palier de routing (sous Haiku)
+
+Extension de l'heuristique (`src/main/claude/router.ts`) : messages sans besoin structurel de tool ni donnée externe (reformulation, traduction, question explicite sur le contexte conversationnel) → `llama3.1:8b` local via `runOllamaChat()` (`src/main/ollama/chat.ts`) au lieu de Haiku. Détection **conservative** — critères documentés inline dans `shouldRouteToLocal()` ; en cas de doute → cloud.
+
+**Déviation spec 9 (V2 vocal)** : le filler vocal vit à la frontière IPC comme le reste du TTS, mais le routing local ajoute une branche dans `chat.ts` — le principe « pas de branche vocale séparée » reste vrai pour ASR/TTS.

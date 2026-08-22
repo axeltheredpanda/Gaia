@@ -62,8 +62,15 @@ export async function setPttShortcutKey(key: string): Promise<void> {
 }
 
 export async function getPiperVoiceName(): Promise<string | null> {
-  const row = await getRow()
-  return row?.piper_voice_name ?? null
+  const fromEnv = process.env.PIPER_VOICE_NAME?.trim() || null
+  if (!isSupabaseConfigured()) return fromEnv
+  try {
+    const row = await getRow()
+    const fromDb = row?.piper_voice_name?.trim()
+    return fromDb || fromEnv
+  } catch {
+    return fromEnv
+  }
 }
 
 export async function setPiperVoiceName(name: string): Promise<void> {

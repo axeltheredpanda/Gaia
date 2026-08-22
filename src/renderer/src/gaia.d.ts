@@ -15,6 +15,8 @@ declare global {
         ) => Promise<{ text: string; model: string; taskActions: string[]; imageDataUri: string | null }>
         onTextChunk: (callback: (delta: string) => void) => () => void
         onTtsAudio: (callback: (wav: ArrayBuffer) => void) => () => void
+        onTtsError: (callback: (message: string) => void) => () => void
+        onOllamaUnavailable: (callback: () => void) => () => void
       }
       auth: {
         linear: {

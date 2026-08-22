@@ -591,35 +591,64 @@ export default function App(): React.JSX.Element {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const isRecordingRef = useRef(false)
+  const recordingStartedAtRef = useRef(0)
+  const MIN_RECORDING_MS = 900
 
-  const audioQueueRef = useRef<HTMLAudioElement[]>([])
+  const audioUnlockRef = useRef<AudioContext | null>(null)
+  const wavQueueRef = useRef<ArrayBuffer[]>([])
   const isPlayingRef = useRef(false)
   const ttsActiveRef = useRef(false)
 
-  /** File de lecture des phrases synthétisées par Piper (spec V2 vocal 3) — lues dans l'ordre de réception, jamais en parallèle (chaque phrase attend la fin de la précédente). */
-  function playNextInQueue(): void {
-    const next = audioQueueRef.current.shift()
-    if (!next) {
+  async function getAudioContext(): Promise<AudioContext> {
+    if (!audioUnlockRef.current) audioUnlockRef.current = new AudioContext()
+    await audioUnlockRef.current.resume()
+    return audioUnlockRef.current
+  }
+
+  /** Lecture via Web Audio API — plus fiable qu'un élément <audio> dans Electron après un délai async. */
+  async function playNextInQueue(): Promise<void> {
+    const wav = wavQueueRef.current.shift()
+    if (!wav) {
       isPlayingRef.current = false
       setHudState({ state: 'idle' })
       return
     }
     isPlayingRef.current = true
     setHudState({ state: 'responding' })
-    next.onended = () => {
-      URL.revokeObjectURL(next.src)
-      playNextInQueue()
+    try {
+      const ctx = await getAudioContext()
+      const buffer = await ctx.decodeAudioData(wav.slice(0))
+      await new Promise<void>((resolve, reject) => {
+        const source = ctx.createBufferSource()
+        source.buffer = buffer
+        source.connect(ctx.destination)
+        source.onended = () => resolve()
+        source.start(0)
+        source.addEventListener('error', () => reject(new Error('Lecture WAV interrompue')), { once: true })
+      })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'lecture impossible'
+      pushToasts([`⚠ Lecture audio : ${message}`])
     }
-    next.play().catch(() => playNextInQueue())
+    await playNextInQueue()
   }
 
   useEffect(() => {
-    return window.gaia.chat.onTtsAudio((wav) => {
+    const offAudio = window.gaia.chat.onTtsAudio((wav) => {
+      if (!wav.byteLength) return
       ttsActiveRef.current = true
-      const url = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }))
-      audioQueueRef.current.push(new Audio(url))
-      if (!isPlayingRef.current) playNextInQueue()
+      wavQueueRef.current.push(wav.slice(0))
+      if (!isPlayingRef.current) void playNextInQueue()
     })
+    const offError = window.gaia.chat.onTtsError((message) => pushToasts([`⚠ Voix : ${message}`]))
+    const offOllama = window.gaia.chat.onOllamaUnavailable(() =>
+      pushToasts(['Ollama absent — filler vocal et modèle local désactivés (lancez `ollama serve`).'])
+    )
+    return () => {
+      offAudio()
+      offError()
+      offOllama()
+    }
   }, [])
 
   /**
@@ -631,6 +660,8 @@ export default function App(): React.JSX.Element {
     if (isRecordingRef.current) return
     isRecordingRef.current = true
     try {
+      if (!audioUnlockRef.current) audioUnlockRef.current = new AudioContext()
+      await audioUnlockRef.current.resume()
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const recorder = new MediaRecorder(stream)
       audioChunksRef.current = []
@@ -642,7 +673,8 @@ export default function App(): React.JSX.Element {
         void finishRecording()
       }
       mediaRecorderRef.current = recorder
-      recorder.start()
+      recordingStartedAtRef.current = Date.now()
+      recorder.start(250)
       setHudState({ state: 'listening' })
     } catch (err) {
       isRecordingRef.current = false
@@ -651,9 +683,18 @@ export default function App(): React.JSX.Element {
   }
 
   function stopRecording(): void {
-    if (!isRecordingRef.current) return
-    isRecordingRef.current = false
-    mediaRecorderRef.current?.stop()
+    if (!isRecordingRef.current || !mediaRecorderRef.current) return
+    const recorder = mediaRecorderRef.current
+    const wait = Math.max(0, MIN_RECORDING_MS - (Date.now() - recordingStartedAtRef.current))
+
+    const doStop = (): void => {
+      if (recorder.state !== 'recording') return
+      isRecordingRef.current = false
+      recorder.stop()
+    }
+
+    if (wait > 0) setTimeout(doStop, wait)
+    else doStop()
   }
 
   async function finishRecording(): Promise<void> {
@@ -667,6 +708,7 @@ export default function App(): React.JSX.Element {
       const buffer = await blob.arrayBuffer()
       const text = (await window.gaia.voice.transcribe(buffer)).trim()
       if (!text) {
+        pushToasts(['⚠ Aucune parole détectée — maintiens le micro un peu plus longtemps.'])
         setHudState({ state: 'idle' })
         return
       }
